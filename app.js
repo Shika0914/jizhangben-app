@@ -74,6 +74,7 @@ let authMode = "login";
 let cloudHydrating = false;
 let cloudSaveTimer = null;
 let cloudLoadedForUser = "";
+let draggedAccountId = "";
 
 const el = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -450,9 +451,11 @@ function renderDashboard() {
 }
 
 function renderAssets() {
-  const accounts = state.accounts.map((account) => ({
+  const accounts = state.accounts.map((account, index) => ({
     account,
     balance: getAccountBalance(account.id),
+    index,
+    total: state.accounts.length,
   }));
   const included = accounts.filter(({ account }) => account.includeInAssets);
   const excludedCount = accounts.length - included.length;
@@ -935,6 +938,66 @@ function deleteAccount(id) {
   toast("钱包已删除");
 }
 
+function moveAccount(id, direction) {
+  const index = state.accounts.findIndex((item) => item.id === id);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= state.accounts.length) return;
+
+  const accounts = [...state.accounts];
+  const [account] = accounts.splice(index, 1);
+  accounts.splice(nextIndex, 0, account);
+  state.accounts = accounts;
+  saveState();
+  renderAll();
+  toast("钱包顺序已更新");
+}
+
+function startAccountDrag(event, id) {
+  draggedAccountId = id;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", id);
+  event.currentTarget.closest(".account-item")?.classList.add("is-dragging");
+}
+
+function endAccountDrag(event) {
+  draggedAccountId = "";
+  event.currentTarget.closest(".account-item")?.classList.remove("is-dragging");
+  document.querySelectorAll(".account-item.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
+}
+
+function allowAccountDrop(event) {
+  event.preventDefault();
+  event.currentTarget.classList.add("is-drag-over");
+}
+
+function leaveAccountDrop(event) {
+  if (event.currentTarget.contains(event.relatedTarget)) return;
+  event.currentTarget.classList.remove("is-drag-over");
+}
+
+function dropAccount(event, targetId) {
+  event.preventDefault();
+  event.currentTarget.classList.remove("is-drag-over");
+  const sourceId = draggedAccountId || event.dataTransfer.getData("text/plain");
+  if (!sourceId || sourceId === targetId) return;
+
+  const accounts = [...state.accounts];
+  const sourceIndex = accounts.findIndex((item) => item.id === sourceId);
+  if (sourceIndex < 0) return;
+
+  const [account] = accounts.splice(sourceIndex, 1);
+  const targetIndex = accounts.findIndex((item) => item.id === targetId);
+  if (targetIndex < 0) return;
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  const insertAfter = event.clientY > rect.top + rect.height / 2;
+  accounts.splice(targetIndex + (insertAfter ? 1 : 0), 0, account);
+  state.accounts = accounts;
+  saveState();
+  renderAll();
+  toast("钱包顺序已更新");
+}
+
 function resetTransactionForm() {
   el.transactionForm.reset();
   el.transactionForm.date.value = toDateTimeInput(new Date());
@@ -1117,7 +1180,7 @@ function renderRankItem(row) {
   </div>`;
 }
 
-function renderAccountItem({ account, balance }) {
+function renderAccountItem({ account, balance, index, total }) {
   const meta = getAccountVisual(account);
   const isCreditCard = account.type === "credit_card";
   const outstanding = isCreditCard ? Math.max(0, -balance) : 0;
@@ -1135,7 +1198,7 @@ function renderAccountItem({ account, balance }) {
   const balanceMarkup = isCreditCard
     ? `<div class="account-balance-block"><span>待还款</span><strong class="account-balance ${outstanding > 0 ? "is-negative" : ""}">${money(outstanding, account.currency)}</strong></div>`
     : `<strong class="account-balance ${balance < 0 ? "is-negative" : ""}">${money(balance, account.currency)}</strong>`;
-  return `<div class="account-item">
+  return `<div class="account-item" ondragover="allowAccountDrop(event)" ondragleave="leaveAccountDrop(event)" ondrop="dropAccount(event, '${account.id}')">
     ${logo}
     <div class="item-main">
       <strong>${escapeHtml(account.name)}</strong>
@@ -1143,6 +1206,7 @@ function renderAccountItem({ account, balance }) {
     </div>
     ${balanceMarkup}
     <div class="row-actions">
+      <button class="icon-button drag-handle" type="button" draggable="true" ondragstart="startAccountDrag(event, '${account.id}')" ondragend="endAccountDrag(event)" title="拖动排序" aria-label="拖动排序"><span aria-hidden="true"></span></button>
       <button class="icon-button" type="button" onclick="editAccount('${account.id}')" title="编辑钱包" aria-label="编辑钱包"><span class="action-icon pencil-icon" aria-hidden="true"></span></button>
       <button class="icon-button danger-button" type="button" onclick="deleteAccount('${account.id}')" title="删除钱包" aria-label="删除钱包"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
     </div>
