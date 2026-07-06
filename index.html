@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>记账本 - 个人记账</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230f766e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg transform='translate(1 0)'%3E%3Cpath d='M2 6h4M2 10h4M2 14h4M2 18h4'/%3E%3Crect width='16' height='20' x='4' y='2' rx='2'/%3E%3Cpath d='M16 2v20M8 7h4M8 11h4'/%3E%3C/g%3E%3C/svg%3E" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <g transform="translate(1 0)">
+                <path d="M2 6h4M2 10h4M2 14h4M2 18h4" />
+                <rect width="16" height="20" x="4" y="2" rx="2" />
+                <path d="M16 2v20M8 7h4M8 11h4" />
+              </g>
+            </svg>
+          </span>
+          <div>
+            <strong>记账本</strong>
+            <span>个人记账</span>
+          </div>
+        </div>
+        <nav class="nav-tabs">
+          <button class="nav-tab active" data-view="dashboard" type="button">总览</button>
+          <button class="nav-tab" data-view="assets" type="button">资产</button>
+          <button class="nav-tab" data-view="add" type="button">记一笔</button>
+          <button class="nav-tab" data-view="bills" type="button">账单</button>
+          <button class="nav-tab" data-view="categories" type="button">分类</button>
+          <button class="nav-tab" data-view="stats" type="button">统计</button>
+        </nav>
+        <div class="cloud-account">
+          <button class="ghost-button" id="openAuthModal" type="button">登录并同步</button>
+          <div class="cloud-user" id="cloudUser" hidden>
+            <span class="cloud-user-email" id="cloudUserEmail"></span>
+            <button class="link-button" id="signOutButton" type="button">退出登录</button>
+          </div>
+          <span class="sync-status" id="syncStatus">仅保存在本机</span>
+        </div>
+        <button class="ghost-button" id="exportCsv" type="button">导出 CSV</button>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="todayText"></p>
+            <h1 id="viewTitle">总览</h1>
+          </div>
+          <div class="month-control">
+            <label for="monthPicker">月份</label>
+            <input id="monthPicker" type="month" />
+          </div>
+        </header>
+
+        <section class="view active" id="dashboardView">
+          <div class="metric-grid">
+            <article class="metric">
+              <span>本月支出</span>
+              <strong id="monthExpense">¥0</strong>
+            </article>
+            <article class="metric">
+              <span>本月收入</span>
+              <strong id="monthIncome">¥0</strong>
+            </article>
+            <article class="metric">
+              <span>本月结余</span>
+              <strong id="monthBalance">¥0</strong>
+            </article>
+            <article class="metric">
+              <span>今日支出</span>
+              <strong id="todayExpense">¥0</strong>
+            </article>
+            <article class="metric asset-metric">
+              <span>总资产</span>
+              <div class="metric-currency-list" id="dashboardTotalAssets" aria-live="polite"></div>
+            </article>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel quick-entry">
+              <div class="panel-heading">
+                <h2>快速记账</h2>
+                <button class="link-button" id="addQuickTemplate" type="button">＋ 新建模板</button>
+              </div>
+              <form id="quickForm" class="compact-form">
+                <input name="amount" type="number" step="0.01" min="0" placeholder="金额" required />
+                <select name="categoryId" required></select>
+                <select name="accountId" required></select>
+                <input name="note" type="text" placeholder="备注" />
+                <button class="primary-button" type="submit">保存</button>
+              </form>
+              <form id="quickTemplateForm" class="quick-template-editor" hidden>
+                <input name="id" type="hidden" />
+                <input name="note" type="text" placeholder="模板名称" required />
+                <input name="amount" type="number" step="0.01" min="0.01" placeholder="金额" required />
+                <select name="categoryId" required></select>
+                <select name="accountId" required></select>
+                <div class="template-editor-actions">
+                  <button class="icon-button danger-button template-delete" id="deleteQuickTemplate" type="button" title="删除模板" aria-label="删除模板">
+                    <span class="action-icon trash-icon" aria-hidden="true"></span>
+                  </button>
+                  <button class="secondary-button" id="cancelQuickTemplate" type="button">取消</button>
+                  <button class="primary-button" type="submit">保存模板</button>
+                </div>
+              </form>
+              <div class="template-row" id="templateRow"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>最近账单</h2>
+                <button class="link-button" data-view-jump="bills" type="button">查看全部</button>
+              </div>
+              <div class="bill-list" id="recentBills"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>分类支出 Top 5</h2>
+              </div>
+              <div class="rank-list" id="topCategories"></div>
+            </section>
+
+          </div>
+        </section>
+
+        <section class="view" id="assetsView">
+          <section class="asset-summary">
+            <div class="asset-summary-main">
+              <span>总资产</span>
+              <div class="asset-total-list" id="totalAssets" aria-live="polite"></div>
+            </div>
+            <p id="assetSummary">共 0 个钱包</p>
+          </section>
+
+          <section class="panel asset-list-panel">
+            <div class="panel-heading">
+              <div>
+                <h2>我的钱包</h2>
+                <span class="panel-note" id="includedAccountCount">0 个计入总资产</span>
+              </div>
+              <button class="primary-button" id="openAccountModal" type="button">新增钱包</button>
+            </div>
+            <div class="account-list" id="accountList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="addView">
+          <form id="transactionForm" class="panel form-panel">
+            <input type="hidden" name="id" />
+            <div class="segmented" role="tablist" aria-label="记账类型">
+              <button class="segment active" data-type="expense" type="button">支出</button>
+              <button class="segment" data-type="income" type="button">收入</button>
+              <button class="segment" data-type="transfer" type="button">转账</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                金额
+                <input name="amount" type="number" step="0.01" min="0" required />
+              </label>
+              <label class="category-field">
+                分类
+                <select name="categoryId" required></select>
+              </label>
+              <label>
+                账户
+                <select name="accountId"></select>
+              </label>
+              <label class="target-account-field">
+                转入账户
+                <select name="targetAccountId"></select>
+              </label>
+              <label>
+                日期
+                <input name="date" type="datetime-local" required />
+              </label>
+              <label>
+                标签
+                <input name="tags" type="text" placeholder="用逗号分隔" />
+              </label>
+              <label class="wide">
+                备注
+                <textarea name="note" rows="3"></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="secondary-button" id="resetTransaction" type="button">清空</button>
+              <button class="primary-button" type="submit">保存账单</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="view" id="billsView">
+          <div class="panel">
+            <div class="filter-bar">
+              <input id="billSearch" type="search" placeholder="搜索备注、标签" />
+              <select id="typeFilter">
+                <option value="all">全部类型</option>
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+                <option value="transfer">转账</option>
+              </select>
+              <select id="categoryFilter"></select>
+              <select id="accountFilter"></select>
+            </div>
+            <div class="bulk-toolbar" id="bulkToolbar">
+              <label class="checkbox-line">
+                <input id="selectAllBills" type="checkbox" />
+                全选当前列表
+              </label>
+              <span id="selectedBillCount">已选 0 笔</span>
+              <button class="secondary-button" id="clearBillSelection" type="button">清空选择</button>
+              <button class="icon-button danger-button" id="deleteSelectedBills" type="button" title="批量删除" aria-label="批量删除">
+                <span class="action-icon trash-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="bill-table" id="billTable"></div>
+          </div>
+        </section>
+
+        <section class="view" id="categoriesView">
+          <div class="content-grid two-col">
+            <form id="categoryForm" class="panel form-panel">
+              <input type="hidden" name="id" />
+              <div class="panel-heading">
+                <h2 id="categoryFormTitle">新增分类</h2>
+              </div>
+              <div class="form-grid one-col">
+                <label>
+                  分类名称
+                  <input name="name" type="text" required />
+                </label>
+                <label>
+                  类型
+                  <select name="type">
+                    <option value="expense">支出</option>
+                    <option value="income">收入</option>
+                  </select>
+                </label>
+                <label>
+                  图标
+                  <input name="icon" type="text" maxlength="2" placeholder="餐" required />
+                </label>
+                <label>
+                  颜色
+                  <input name="color" type="color" value="#247c7a" />
+                </label>
+                <label class="checkbox-line">
+                  <input name="enabled" type="checkbox" checked />
+                  启用
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="secondary-button" id="resetCategory" type="button">新增分类</button>
+                <button class="primary-button" type="submit">保存分类</button>
+              </div>
+            </form>
+            <div class="panel">
+              <div class="panel-heading">
+                <h2>分类列表</h2>
+              </div>
+              <div class="category-list" id="categoryList"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="statsView">
+          <div class="stats-toolbar">
+            <label for="statsCurrency">统计币种</label>
+            <select id="statsCurrency"></select>
+          </div>
+          <div class="metric-grid">
+            <article class="metric">
+              <span>储蓄率</span>
+              <strong id="savingRate">0%</strong>
+            </article>
+            <article class="metric">
+              <span>最大支出分类</span>
+              <strong id="largestCategory">-</strong>
+            </article>
+            <article class="metric">
+              <span>最大单笔消费</span>
+              <strong id="largestExpense">¥0</strong>
+            </article>
+            <article class="metric">
+              <span>比上月变化</span>
+              <strong id="monthDelta">¥0</strong>
+            </article>
+          </div>
+          <div class="content-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>每日支出</h2>
+              </div>
+              <div class="bar-chart" id="dailyChart"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>分类占比</h2>
+              </div>
+              <div class="donut-area">
+                <div class="donut" id="categoryDonut"></div>
+                <div class="rank-list" id="categoryShare"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="accountModal" hidden>
+      <section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="accountFormTitle">
+        <form id="accountForm">
+          <input type="hidden" name="id" />
+          <div class="modal-heading">
+            <h2 id="accountFormTitle">新增钱包</h2>
+            <button class="modal-close" id="closeAccountModal" type="button" aria-label="关闭窗口" title="关闭">×</button>
+          </div>
+          <div class="modal-body form-grid one-col">
+            <label>
+              钱包名称
+              <input name="name" type="text" placeholder="例如：招商银行、京东钱包" required />
+            </label>
+            <label>
+              钱包类型
+              <select name="type">
+                <option value="wechat">微信</option>
+                <option value="alipay">支付宝</option>
+                <option value="bank">银行卡</option>
+                <option value="credit_card">信用卡</option>
+                <option value="cash">现金</option>
+                <option value="other">其他钱包</option>
+              </select>
+            </label>
+            <label>
+              币种
+              <select name="currency">
+                <option value="CNY">人民币 CNY</option>
+                <option value="USD">美元 USD</option>
+                <option value="EUR">欧元 EUR</option>
+                <option value="GBP">英镑 GBP</option>
+                <option value="JPY">日元 JPY</option>
+                <option value="HKD">港币 HKD</option>
+                <option value="TWD">新台币 TWD</option>
+                <option value="KRW">韩元 KRW</option>
+                <option value="SGD">新加坡元 SGD</option>
+                <option value="AUD">澳大利亚元 AUD</option>
+                <option value="CAD">加拿大元 CAD</option>
+              </select>
+            </label>
+            <div class="credit-card-fields" id="creditCardFields" hidden>
+              <label>
+                信用额度
+                <input name="creditLimit" type="number" min="0" step="0.01" value="0" required />
+              </label>
+              <label>
+                账单日
+                <input name="billingDay" type="number" min="1" max="28" step="1" value="1" required />
+              </label>
+              <label>
+                还款日
+                <input name="dueDay" type="number" min="1" max="28" step="1" value="20" required />
+              </label>
+            </div>
+            <label>
+              <span id="initialBalanceLabel">期初余额</span>
+              <input name="initialBalance" type="number" step="0.01" value="0" required />
+            </label>
+            <label class="checkbox-line">
+              <input name="includeInAssets" type="checkbox" checked />
+              计入总资产
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelAccountModal" type="button">取消</button>
+            <button class="primary-button" type="submit">保存钱包</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="authModal" hidden>
+      <section class="modal-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authFormTitle">
+        <form id="authForm">
+          <div class="modal-heading">
+            <h2 id="authFormTitle">登录同步</h2>
+            <button class="modal-close" id="closeAuthModal" type="button" aria-label="关闭窗口" title="关闭">×</button>
+          </div>
+          <div class="modal-body form-grid one-col">
+            <label id="authEmailField">
+              邮箱
+              <input name="email" type="email" autocomplete="email" required />
+            </label>
+            <label>
+              密码
+              <input name="password" type="password" minlength="8" autocomplete="current-password" required />
+            </label>
+            <div class="auth-links">
+              <button class="link-button" id="forgotPassword" type="button">忘记密码</button>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancelAuthModal" type="button">取消</button>
+            <button class="secondary-button" id="registerButton" type="button">注册</button>
+            <button class="primary-button" id="authSubmit" type="submit">登录</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./assets/vendor/supabase.js?v=1"></script>
+    <script src="./app.js?v=12"></script>
+  </body>
+</html>
