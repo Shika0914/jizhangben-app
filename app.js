@@ -49,10 +49,10 @@ const defaultCategories = [
 }));
 
 const defaultAccounts = [
-  { id: "alipay", name: "支付宝", type: "alipay", currency: "CNY", initialBalance: 0, includeInAssets: true },
-  { id: "wechat", name: "微信", type: "wechat", currency: "CNY", initialBalance: 0, includeInAssets: true },
-  { id: "bank", name: "银行卡", type: "bank", currency: "CNY", initialBalance: 0, includeInAssets: true },
-  { id: "cash", name: "现金", type: "cash", currency: "CNY", initialBalance: 0, includeInAssets: true },
+  { id: "alipay", name: "支付宝", type: "alipay", currency: "CNY", initialBalance: 0, balances: [{ currency: "CNY", initialBalance: 0 }], includeInAssets: true },
+  { id: "wechat", name: "微信", type: "wechat", currency: "CNY", initialBalance: 0, balances: [{ currency: "CNY", initialBalance: 0 }], includeInAssets: true },
+  { id: "bank", name: "银行卡", type: "bank", currency: "CNY", initialBalance: 0, balances: [{ currency: "CNY", initialBalance: 0 }], includeInAssets: true },
+  { id: "cash", name: "现金", type: "cash", currency: "CNY", initialBalance: 0, balances: [{ currency: "CNY", initialBalance: 0 }], includeInAssets: true },
 ];
 
 const accountTypes = {
@@ -100,6 +100,7 @@ const viewTitles = {
   assets: "资产",
   add: "记一笔",
   bills: "账单",
+  credit: "信用卡",
   categories: "分类",
   stats: "统计",
 };
@@ -138,6 +139,18 @@ function bindEvents() {
   el.quickTemplateForm.addEventListener("submit", saveQuickTemplate);
   el.accountForm.addEventListener("submit", saveAccount);
   el.accountForm.type.addEventListener("change", updateCreditCardFields);
+  el.transactionForm.accountId.addEventListener("change", () => {
+    fillTransactionCurrencySelect();
+    updateInstallmentFields();
+  });
+  el.transactionForm.useInstallment.addEventListener("change", () => {
+    if (el.transactionForm.useInstallment.checked) syncInstallmentStartDate();
+    updateInstallmentFields();
+  });
+  el.transactionForm.date.addEventListener("change", () => {
+    if (!el.transactionForm.useInstallment.checked) syncInstallmentStartDate();
+  });
+  document.querySelector("#addAccountBalance").addEventListener("click", () => addAccountBalanceRow());
   el.statsCurrency.addEventListener("change", renderStats);
   el.categoryForm.addEventListener("submit", saveCategory);
   el.authForm.addEventListener("submit", submitAuthForm);
@@ -426,6 +439,7 @@ function renderAll() {
   renderDashboard();
   renderAssets();
   renderBills();
+  renderCreditCards();
   renderCategories();
   renderStats();
   renderTemplates();
@@ -453,7 +467,7 @@ function renderDashboard() {
 function renderAssets() {
   const accounts = state.accounts.map((account, index) => ({
     account,
-    balance: getAccountBalance(account.id),
+    balances: getAccountBalances(account.id),
     index,
     total: state.accounts.length,
   }));
@@ -486,6 +500,22 @@ function renderBills() {
   selectedBillIds = new Set([...selectedBillIds].filter((id) => rows.some((item) => item.id === id)));
   renderList("billTable", rows, renderTableRow, "没有符合条件的账单");
   updateBulkToolbar(rows);
+}
+
+function renderCreditCards() {
+  const creditAccounts = state.accounts.filter((account) => account.type === "credit_card");
+  const creditAccountIds = new Set(creditAccounts.map((account) => account.id));
+  const installmentBills = state.transactions
+    .filter((item) => item.installmentGroupId && creditAccountIds.has(item.accountId))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  const plans = groupInstallmentBills(installmentBills);
+  setText("installmentSummary", `${plans.length} 个分期计划`);
+  renderList("installmentPlanList", plans, renderInstallmentPlan, "还没有信用卡分期");
+
+  const currentBills = monthTransactions()
+    .filter((item) => creditAccountIds.has(item.accountId))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  renderList("creditBillList", currentBills, renderCreditBillItem, "本月还没有信用卡账单");
 }
 
 function renderCategories() {
@@ -656,19 +686,29 @@ function saveTransaction(event) {
   const form = el.transactionForm;
   const sourceAccount = findAccount(form.accountId.value || defaultAccountId());
   const targetAccount = findAccount(form.targetAccountId.value);
+  const currency = supportedCurrencies.includes(form.currency.value) ? form.currency.value : currencyForAccount(sourceAccount?.id);
+  const useInstallment = canUseInstallment() && form.useInstallment.checked && !form.id.value;
   if (selectedType === "transfer" && form.accountId.value === form.targetAccountId.value) {
     toast("转出和转入不能是同一个钱包");
     return;
   }
-  if (selectedType === "transfer" && sourceAccount?.currency !== targetAccount?.currency) {
-    toast("暂不支持不同币种钱包之间直接转账");
+  if (selectedType === "transfer" && !targetAccount) {
+    toast("请选择转入钱包");
+    return;
+  }
+  if (selectedType === "transfer" && !accountCurrencies(targetAccount).includes(currency)) {
+    toast("转入钱包没有这个币种");
+    return;
+  }
+  if (useInstallment) {
+    saveInstallmentTransactions(form, currency);
     return;
   }
   const transaction = {
     id: form.id.value || crypto.randomUUID(),
     type: selectedType,
     amount: Number(form.amount.value),
-    currency: sourceAccount?.currency || "CNY",
+    currency,
     categoryId: selectedType === "transfer" ? "transfer" : form.categoryId.value,
     accountId: form.accountId.value || defaultAccountId(),
     targetAccountId: selectedType === "transfer" ? form.targetAccountId.value : "",
@@ -682,6 +722,45 @@ function saveTransaction(event) {
   resetTransactionForm();
   form.amount.focus();
   toast("账单已保存");
+}
+
+function saveInstallmentTransactions(form, currency) {
+  const count = Math.min(60, Math.max(2, Number(form.installmentCount.value || 2)));
+  const totalAmount = Number(form.amount.value);
+  const baseAmount = Math.floor((totalAmount / count) * 100) / 100;
+  const date = new Date(form.installmentStartDate.value || form.date.value);
+  const groupId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const note = form.note.value.trim() || "信用卡分期";
+  const tags = splitTags(form.tags.value);
+  const transactions = Array.from({ length: count }, (_, index) => {
+    const amount = index === count - 1 ? Number((totalAmount - baseAmount * (count - 1)).toFixed(2)) : baseAmount;
+    return {
+      id: crypto.randomUUID(),
+      type: "expense",
+      amount,
+      currency,
+      categoryId: form.categoryId.value,
+      accountId: form.accountId.value || defaultAccountId(),
+      targetAccountId: "",
+      date: addMonthsToDate(date, index).toISOString(),
+      note: `${note} ${index + 1}/${count}`,
+      tags,
+      installmentGroupId: groupId,
+      installmentIndex: index + 1,
+      installmentCount: count,
+      installmentTotal: totalAmount,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
+  state.transactions = [...transactions, ...state.transactions];
+  saveState();
+  renderAll();
+  resetTransactionForm();
+  form.amount.focus();
+  toast(`已生成 ${count} 期账单`);
 }
 
 function saveQuickTransaction(event) {
@@ -717,6 +796,11 @@ function saveAccount(event) {
   const form = el.accountForm;
   const name = form.name.value.trim();
   const isCreditCard = form.type.value === "credit_card";
+  const balances = readAccountBalanceRows(isCreditCard);
+  if (!balances.length) {
+    toast("请至少保留一个币种余额");
+    return;
+  }
   const duplicate = state.accounts.some(
     (item) => item.id !== form.id.value && item.name.trim().toLowerCase() === name.toLowerCase()
   );
@@ -729,8 +813,9 @@ function saveAccount(event) {
     id: form.id.value || crypto.randomUUID(),
     name,
     type: form.type.value,
-    currency: supportedCurrencies.includes(form.currency.value) ? form.currency.value : "CNY",
-    initialBalance: isCreditCard ? -Math.abs(Number(form.initialBalance.value || 0)) : Number(form.initialBalance.value || 0),
+    currency: balances[0].currency,
+    initialBalance: balances[0].initialBalance,
+    balances,
     creditLimit: isCreditCard ? Math.max(0, Number(form.creditLimit.value || 0)) : 0,
     billingDay: isCreditCard ? Number(form.billingDay.value || 1) : 1,
     dueDay: isCreditCard ? Number(form.dueDay.value || 20) : 20,
@@ -741,8 +826,14 @@ function saveAccount(event) {
   const hasTransactions = existingAccount && state.transactions.some(
     (item) => item.accountId === account.id || item.targetAccountId === account.id
   );
-  if (hasTransactions && existingAccount.currency !== account.currency) {
-    toast("已有账单的钱包不能直接修改币种");
+  const missingCurrencies = hasTransactions
+    ? [...new Set(state.transactions
+        .filter((item) => item.accountId === account.id || item.targetAccountId === account.id)
+        .map((item) => transactionCurrency(item)))]
+        .filter((currency) => !balances.some((balance) => balance.currency === currency))
+    : [];
+  if (missingCurrencies.length) {
+    toast(`已有 ${missingCurrencies.join("、")} 账单，不能删除这些币种`);
     return;
   }
   if (hasTransactions && existingAccount.type !== account.type && [existingAccount.type, account.type].includes("credit_card")) {
@@ -795,10 +886,13 @@ function editTransaction(id) {
   form.amount.value = item.amount;
   form.categoryId.value = item.categoryId;
   form.accountId.value = item.accountId;
+  fillTransactionCurrencySelect();
+  form.currency.value = transactionCurrency(item);
   form.targetAccountId.value = item.targetAccountId || "";
   form.date.value = toDateTimeInput(new Date(item.date));
   form.tags.value = item.tags.join(", ");
   form.note.value = item.note;
+  updateInstallmentFields();
   switchView("add");
 }
 
@@ -903,12 +997,11 @@ function editAccount(id) {
   form.id.value = account.id;
   form.name.value = account.name;
   form.type.value = account.type;
-  form.currency.value = account.currency || "CNY";
   updateCreditCardFields();
   form.creditLimit.value = account.creditLimit || 0;
   form.billingDay.value = account.billingDay || 1;
   form.dueDay.value = account.dueDay || 20;
-  form.initialBalance.value = account.type === "credit_card" ? Math.abs(account.initialBalance) : account.initialBalance;
+  renderAccountBalanceRows(account.balances || accountBalances(account.id), account.type === "credit_card");
   form.includeInAssets.checked = account.includeInAssets;
   document.querySelector("#accountFormTitle").textContent = "编辑钱包";
   showAccountModal();
@@ -1001,21 +1094,46 @@ function dropAccount(event, targetId) {
 function resetTransactionForm() {
   el.transactionForm.reset();
   el.transactionForm.date.value = toDateTimeInput(new Date());
+  el.transactionForm.installmentStartDate.value = toDateInput(new Date());
+  el.transactionForm.installmentCount.value = "3";
   el.transactionForm.accountId.value = defaultAccountId();
+  fillTransactionCurrencySelect();
   selectedType = "expense";
   setType("expense");
+}
+
+function canUseInstallment() {
+  const form = el.transactionForm;
+  const account = findAccount(form.accountId.value || defaultAccountId());
+  return selectedType === "expense" && account?.type === "credit_card" && !form.id.value;
+}
+
+function updateInstallmentFields() {
+  const form = el.transactionForm;
+  const enabled = canUseInstallment();
+  document.querySelector(".installment-toggle-field").hidden = !enabled;
+  if (!enabled) form.useInstallment.checked = false;
+  document.querySelector("#installmentFields").hidden = !(enabled && form.useInstallment.checked);
+  form.installmentCount.disabled = !(enabled && form.useInstallment.checked);
+  form.installmentStartDate.disabled = !(enabled && form.useInstallment.checked);
+  if (!form.installmentStartDate.value) form.installmentStartDate.value = form.date.value ? form.date.value.slice(0, 10) : toDateInput(new Date());
+}
+
+function syncInstallmentStartDate() {
+  el.transactionForm.installmentStartDate.value = el.transactionForm.date.value
+    ? el.transactionForm.date.value.slice(0, 10)
+    : toDateInput(new Date());
 }
 
 function resetAccountForm() {
   el.accountForm.reset();
   el.accountForm.id.value = "";
-  el.accountForm.currency.value = "CNY";
   el.accountForm.creditLimit.value = "0";
   el.accountForm.billingDay.value = "1";
   el.accountForm.dueDay.value = "20";
-  el.accountForm.initialBalance.value = "0";
   el.accountForm.includeInAssets.checked = true;
   document.querySelector("#accountFormTitle").textContent = "新增钱包";
+  renderAccountBalanceRows([{ currency: "CNY", initialBalance: 0 }], false);
   updateCreditCardFields();
 }
 
@@ -1026,13 +1144,71 @@ function updateCreditCardFields() {
   form.creditLimit.disabled = !isCreditCard;
   form.billingDay.disabled = !isCreditCard;
   form.dueDay.disabled = !isCreditCard;
-  document.querySelector("#initialBalanceLabel").textContent = isCreditCard ? "当前欠款" : "期初余额";
-  if (isCreditCard) {
-    form.initialBalance.min = "0";
-    form.initialBalance.value = Math.abs(Number(form.initialBalance.value || 0));
-  } else {
-    form.initialBalance.removeAttribute("min");
+  document.querySelector("#initialBalanceLabel").textContent = isCreditCard ? "币种欠款" : "币种余额";
+  normalizeBalanceRowSigns(isCreditCard);
+}
+
+function renderAccountBalanceRows(balances = [{ currency: "CNY", initialBalance: 0 }], isCreditCard = false) {
+  const rows = balances.length ? balances : [{ currency: "CNY", initialBalance: 0 }];
+  document.querySelector("#accountBalanceRows").innerHTML = rows
+    .map((balance) => accountBalanceRowTemplate(balance, isCreditCard))
+    .join("");
+}
+
+function addAccountBalanceRow(currency = "", initialBalance = 0) {
+  const used = readAccountBalanceRows(false).map((balance) => balance.currency);
+  const nextCurrency = currency || supportedCurrencies.find((item) => !used.includes(item)) || "CNY";
+  document.querySelector("#accountBalanceRows").insertAdjacentHTML(
+    "beforeend",
+    accountBalanceRowTemplate({ currency: nextCurrency, initialBalance }, el.accountForm.type.value === "credit_card")
+  );
+}
+
+function accountBalanceRowTemplate(balance, isCreditCard) {
+  const amount = isCreditCard ? Math.abs(Number(balance.initialBalance || 0)) : Number(balance.initialBalance || 0);
+  return `<div class="balance-row">
+    <select name="balanceCurrency" aria-label="币种">
+      ${supportedCurrencies.map((currency) => `<option value="${currency}" ${currency === balance.currency ? "selected" : ""}>${currencyNames[currency] || currency} ${currency}</option>`).join("")}
+    </select>
+    <input name="balanceAmount" type="number" step="0.01" value="${amount}" aria-label="${isCreditCard ? "当前欠款" : "期初余额"}" />
+    <button class="icon-button danger-button" type="button" onclick="removeAccountBalanceRow(this)" title="删除币种" aria-label="删除币种"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
+  </div>`;
+}
+
+function removeAccountBalanceRow(button) {
+  const rows = document.querySelectorAll("#accountBalanceRows .balance-row");
+  if (rows.length <= 1) {
+    toast("至少保留一个币种");
+    return;
   }
+  button.closest(".balance-row")?.remove();
+}
+
+function readAccountBalanceRows(isCreditCard) {
+  const rows = [...document.querySelectorAll("#accountBalanceRows .balance-row")];
+  const seen = new Set();
+  return rows
+    .map((row) => {
+      const currency = row.querySelector("[name='balanceCurrency']").value;
+      const amount = Number(row.querySelector("[name='balanceAmount']").value || 0);
+      return {
+        currency,
+        initialBalance: isCreditCard ? -Math.abs(amount) : amount,
+      };
+    })
+    .filter((balance) => {
+      if (!supportedCurrencies.includes(balance.currency) || seen.has(balance.currency)) return false;
+      seen.add(balance.currency);
+      return true;
+    });
+}
+
+function normalizeBalanceRowSigns(isCreditCard) {
+  document.querySelectorAll("#accountBalanceRows [name='balanceAmount']").forEach((input) => {
+    if (isCreditCard) input.min = "0";
+    else input.removeAttribute("min");
+    input.value = isCreditCard ? Math.abs(Number(input.value || 0)) : Number(input.value || 0);
+  });
 }
 
 function openNewAccountModal() {
@@ -1066,6 +1242,8 @@ function setType(type) {
   el.transactionForm.classList.toggle("is-transfer", type === "transfer");
   fillCategorySelect(el.transactionForm.categoryId, type === "transfer" ? "expense" : type);
   el.transactionForm.categoryId.disabled = type === "transfer";
+  fillTransactionCurrencySelect();
+  updateInstallmentFields();
 }
 
 function fillSelects() {
@@ -1077,6 +1255,7 @@ function fillSelects() {
   fillCategoryFilter();
   fillAccountSelect(el.transactionForm.accountId);
   fillAccountSelect(el.transactionForm.targetAccountId);
+  fillTransactionCurrencySelect();
   fillAccountFilter();
   fillStatsCurrencySelect();
 }
@@ -1101,14 +1280,25 @@ function fillCategoryFilter() {
 function fillAccountSelect(select) {
   const selected = select.value;
   select.innerHTML = state.accounts
-    .map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${item.currency || "CNY"}</option>`)
+    .map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${accountCurrencies(item).join("/")}</option>`)
     .join("");
   if (selected) select.value = selected;
 }
 
+function fillTransactionCurrencySelect() {
+  const form = el.transactionForm;
+  const selected = form.currency.value;
+  const account = findAccount(form.accountId.value || defaultAccountId());
+  const currencies = accountCurrencies(account);
+  form.currency.innerHTML = currencies
+    .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} ${currency}</option>`)
+    .join("");
+  form.currency.value = currencies.includes(selected) ? selected : currencies[0] || "CNY";
+}
+
 function fillStatsCurrencySelect() {
   const selected = el.statsCurrency.value;
-  const currencies = [...new Set(state.accounts.map((account) => account.currency || "CNY"))];
+  const currencies = [...new Set(state.accounts.flatMap((account) => accountCurrencies(account)))];
   el.statsCurrency.innerHTML = currencies
     .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} ${currency}</option>`)
     .join("");
@@ -1147,6 +1337,56 @@ function renderBillItem(item) {
   </div>`;
 }
 
+function renderCreditBillItem(item) {
+  const category = findCategory(item.categoryId);
+  const installmentText = item.installmentGroupId ? ` · 分期 ${item.installmentIndex || "-"} / ${item.installmentCount || "-"}` : "";
+  return `<div class="bill-item">
+    ${categoryBadge(category, item.type)}
+    <div class="item-main">
+      <strong>${item.note || typeLabel(item.type)}</strong>
+      <span>${formatDate(item.date)} · ${escapeHtml(accountName(item.accountId))}${installmentText}</span>
+    </div>
+    <div class="quick-bill-actions">
+      <strong class="amount-${item.type}">${signedMoney(item)}</strong>
+      <div class="row-actions">
+        <button class="icon-button" type="button" onclick="editTransaction('${item.id}')" title="编辑账单" aria-label="编辑账单"><span class="action-icon pencil-icon" aria-hidden="true"></span></button>
+        <button class="icon-button danger-button" type="button" onclick="deleteTransaction('${item.id}')" title="删除账单" aria-label="删除账单"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderInstallmentPlan(plan) {
+  const paidCount = plan.items.filter((item) => new Date(item.date) <= today).length;
+  return `<article class="installment-plan">
+    <div class="installment-plan-head">
+      <div>
+        <strong>${escapeHtml(plan.title)}</strong>
+        <span>${escapeHtml(accountName(plan.accountId))} · ${plan.items.length} 期 · 已到 ${paidCount} 期</span>
+      </div>
+      <strong>${money(plan.total, plan.currency)}</strong>
+    </div>
+    <div class="installment-period-list">
+      ${plan.items.map(renderInstallmentPeriod).join("")}
+    </div>
+  </article>`;
+}
+
+function renderInstallmentPeriod(item) {
+  const due = new Date(item.date) <= today;
+  return `<div class="installment-period">
+    <div class="item-main">
+      <strong>第 ${item.installmentIndex || "-"} 期</strong>
+      <span>${formatDate(item.date)} · ${due ? "已到期" : "未到期"}</span>
+    </div>
+    <strong class="amount-expense">-${money(item.amount, transactionCurrency(item))}</strong>
+    <div class="row-actions">
+      <button class="icon-button" type="button" onclick="editTransaction('${item.id}')" title="编辑这一期" aria-label="编辑这一期"><span class="action-icon pencil-icon" aria-hidden="true"></span></button>
+      <button class="icon-button danger-button" type="button" onclick="deleteTransaction('${item.id}')" title="删除这一期" aria-label="删除这一期"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
+    </div>
+  </div>`;
+}
+
 function renderTableRow(item) {
   const category = findCategory(item.categoryId);
   return `<div class="table-row">
@@ -1180,10 +1420,11 @@ function renderRankItem(row) {
   </div>`;
 }
 
-function renderAccountItem({ account, balance, index, total }) {
+function renderAccountItem({ account, balances, index, total }) {
   const meta = getAccountVisual(account);
   const isCreditCard = account.type === "credit_card";
-  const outstanding = isCreditCard ? Math.max(0, -balance) : 0;
+  const primaryBalance = balances[0] || { currency: account.currency || "CNY", value: 0 };
+  const outstanding = isCreditCard ? Math.max(0, -primaryBalance.value) : 0;
   const availableCredit = isCreditCard ? Math.max(0, Number(account.creditLimit || 0) - outstanding) : 0;
   const logo = account.type === "bank" || isCreditCard
     ? `<span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>`
@@ -1193,11 +1434,11 @@ function renderAccountItem({ account, balance, index, total }) {
       ? `<span class="account-icon has-logo payment-logo" style="--account-color:${meta.color}"><img src="${meta.logo}" alt="" /></span>`
       : `<span class="account-icon" style="background:${meta.color}">${meta.icon}</span>`;
   const detail = isCreditCard
-    ? `${meta.label} · ${account.currency} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, account.currency)}`
-    : `${meta.label} · ${currencyNames[account.currency] || account.currency} ${account.currency} · ${account.includeInAssets ? "计入总资产" : "未计入总资产"}`;
+    ? `${meta.label} · ${accountCurrencies(account).join("/")} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`
+    : `${meta.label} · ${accountCurrencies(account).join("/")} · ${account.includeInAssets ? "计入总资产" : "未计入总资产"}`;
   const balanceMarkup = isCreditCard
-    ? `<div class="account-balance-block"><span>待还款</span><strong class="account-balance ${outstanding > 0 ? "is-negative" : ""}">${money(outstanding, account.currency)}</strong></div>`
-    : `<strong class="account-balance ${balance < 0 ? "is-negative" : ""}">${money(balance, account.currency)}</strong>`;
+    ? `<div class="account-balance-block">${balances.map(({ currency, value }) => `<span>待还款 ${currency}</span><strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(Math.max(0, -value), currency)}</strong>`).join("")}</div>`
+    : `<div class="account-balance-list">${balances.map(({ currency, value }) => `<strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(value, currency)}</strong>`).join("")}</div>`;
   return `<div class="account-item" ondragover="allowAccountDrop(event)" ondragleave="leaveAccountDrop(event)" ondrop="dropAccount(event, '${account.id}')">
     ${logo}
     <div class="item-main">
@@ -1312,10 +1553,45 @@ function findAccount(id) {
   return state.accounts.find((item) => item.id === id);
 }
 
+function groupInstallmentBills(items) {
+  const groups = new Map();
+  items.forEach((item) => {
+    if (!groups.has(item.installmentGroupId)) groups.set(item.installmentGroupId, []);
+    groups.get(item.installmentGroupId).push(item);
+  });
+  return [...groups.entries()]
+    .map(([id, rows]) => {
+      const sorted = rows.sort((a, b) => (a.installmentIndex || 0) - (b.installmentIndex || 0) || new Date(a.date) - new Date(b.date));
+      const first = sorted[0];
+      return {
+        id,
+        title: installmentBaseTitle(first),
+        accountId: first.accountId,
+        currency: transactionCurrency(first),
+        total: sorted.reduce((sum, item) => sum + item.amount, 0),
+        items: sorted,
+      };
+    })
+    .sort((a, b) => new Date(a.items[0].date) - new Date(b.items[0].date));
+}
+
+function installmentBaseTitle(item) {
+  const note = item.note || "信用卡分期";
+  return note.replace(/\s+\d+\s*\/\s*\d+\s*$/, "");
+}
+
 function getAccountBalance(id) {
   const account = findAccount(id);
   if (!account) return 0;
+  return getAccountBalanceByCurrency(id, currencyForAccount(id));
+}
+
+function getAccountBalanceByCurrency(id, currency) {
+  const account = findAccount(id);
+  if (!account) return 0;
+  const balance = accountBalances(id).find((item) => item.currency === currency);
   return state.transactions.reduce((balance, item) => {
+    if (transactionCurrency(item) !== currency) return balance;
     if (item.type === "expense" && item.accountId === id) return balance - item.amount;
     if (item.type === "income" && item.accountId === id) return balance + item.amount;
     if (item.type === "transfer") {
@@ -1323,15 +1599,23 @@ function getAccountBalance(id) {
       if (item.targetAccountId === id) balance += item.amount;
     }
     return balance;
-  }, Number(account.initialBalance || 0));
+  }, Number(balance?.initialBalance || 0));
+}
+
+function getAccountBalances(id) {
+  return accountBalances(id).map((balance) => ({
+    currency: balance.currency,
+    value: getAccountBalanceByCurrency(id, balance.currency),
+  }));
 }
 
 function getTotalAssetsByCurrency() {
   return state.accounts
     .filter((account) => account.includeInAssets)
     .reduce((totals, account) => {
-      const currency = account.currency || "CNY";
-      totals.set(currency, (totals.get(currency) || 0) + getAccountBalance(account.id));
+      getAccountBalances(account.id).forEach(({ currency, value }) => {
+        totals.set(currency, (totals.get(currency) || 0) + value);
+      });
       return totals;
     }, new Map());
 }
@@ -1404,7 +1688,31 @@ function renderDashboardAssetTotals(totals) {
 }
 
 function currencyForAccount(id) {
-  return findAccount(id)?.currency || "CNY";
+  return accountCurrencies(findAccount(id))[0] || "CNY";
+}
+
+function accountCurrencies(account) {
+  if (!account) return ["CNY"];
+  return accountBalances(account.id || account).map((balance) => balance.currency);
+}
+
+function accountBalances(accountOrId) {
+  const account = typeof accountOrId === "string" ? findAccount(accountOrId) : accountOrId;
+  if (!account) return [{ currency: "CNY", initialBalance: 0 }];
+  const rows = Array.isArray(account.balances) && account.balances.length
+    ? account.balances
+    : [{ currency: account.currency || "CNY", initialBalance: account.initialBalance || 0 }];
+  const seen = new Set();
+  return rows
+    .map((balance) => ({
+      currency: supportedCurrencies.includes(balance.currency) ? balance.currency : "CNY",
+      initialBalance: Number(balance.initialBalance || 0),
+    }))
+    .filter((balance) => {
+      if (seen.has(balance.currency)) return false;
+      seen.add(balance.currency);
+      return true;
+    });
 }
 
 function transactionCurrency(item) {
@@ -1444,11 +1752,32 @@ function migrateState(savedState) {
   if (!Array.isArray(savedState.accounts) || !savedState.accounts.length) savedState.accounts = defaultAccounts;
   savedState.accounts = savedState.accounts.map((account) => {
     const type = accountTypes[account.type] ? account.type : "other";
+    const legacyCurrency = supportedCurrencies.includes(account.currency) ? account.currency : "CNY";
+    const rawBalances = Array.isArray(account.balances) && account.balances.length
+      ? account.balances
+      : [{ currency: legacyCurrency, initialBalance: account.initialBalance || 0 }];
+    const seenCurrencies = new Set();
+    const balances = rawBalances
+      .map((balance) => {
+        const currency = supportedCurrencies.includes(balance.currency) ? balance.currency : legacyCurrency;
+        return {
+          currency,
+          initialBalance: type === "credit_card"
+            ? -Math.abs(Number(balance.initialBalance || 0))
+            : Number(balance.initialBalance || 0),
+        };
+      })
+      .filter((balance) => {
+        if (seenCurrencies.has(balance.currency)) return false;
+        seenCurrencies.add(balance.currency);
+        return true;
+      });
     return {
       ...account,
       type,
-      currency: supportedCurrencies.includes(account.currency) ? account.currency : "CNY",
-      initialBalance: type === "credit_card" ? -Math.abs(Number(account.initialBalance || 0)) : Number(account.initialBalance || 0),
+      currency: balances[0]?.currency || legacyCurrency,
+      initialBalance: balances[0]?.initialBalance || 0,
+      balances: balances.length ? balances : [{ currency: legacyCurrency, initialBalance: 0 }],
       creditLimit: type === "credit_card" ? Math.max(0, Number(account.creditLimit || 0)) : 0,
       billingDay: type === "credit_card" ? Math.min(28, Math.max(1, Number(account.billingDay || 1))) : 1,
       dueDay: type === "credit_card" ? Math.min(28, Math.max(1, Number(account.dueDay || 20))) : 20,
@@ -1528,6 +1857,15 @@ function addMonths(month, offset) {
   const [year, monthIndex] = month.split("-").map(Number);
   const date = new Date(year, monthIndex - 1 + offset, 1);
   return toMonth(date);
+}
+
+function addMonthsToDate(date, offset) {
+  const next = new Date(date);
+  const day = next.getDate();
+  next.setDate(1);
+  next.setMonth(next.getMonth() + offset);
+  next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+  return next;
 }
 
 function splitTags(value) {

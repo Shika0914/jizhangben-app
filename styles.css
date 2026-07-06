@@ -869,6 +869,12 @@ input[type="color"]::-moz-color-swatch {
   gap: 4px;
 }
 
+.account-balance-list {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
 .account-balance-block > span {
   color: var(--muted);
   font-size: 11px;
@@ -989,6 +995,33 @@ input[type="color"]::-moz-color-swatch {
   display: contents;
 }
 
+.account-balance-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.balance-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.balance-row-list {
+  display: grid;
+  gap: 8px;
+}
+
+.balance-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -1022,6 +1055,16 @@ label {
 
 .is-transfer .category-field {
   display: none;
+}
+
+.installment-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.045);
 }
 
 .form-actions {
@@ -1093,6 +1136,47 @@ label {
   display: grid;
   justify-items: end;
   gap: 6px;
+}
+
+.installment-plan-list {
+  display: grid;
+  gap: 12px;
+}
+
+.installment-plan {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.installment-plan-head,
+.installment-period {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.installment-plan-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.installment-period-list {
+  display: grid;
+  gap: 6px;
+}
+
+.installment-period {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: 48px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
 }
 
 .icon-button {
@@ -1388,6 +1472,8 @@ label {
   .metric-grid,
   .form-grid,
   .compact-form,
+  .balance-row,
+  .installment-fields,
   .quick-template-editor {
     grid-template-columns: 1fr;
   }
