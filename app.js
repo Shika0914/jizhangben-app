@@ -65,6 +65,10 @@ const accountTypes = {
 };
 const accountTypeAliases = {
   credit: "credit_card",
+  creditcard: "credit_card",
+  creditCard: "credit_card",
+  "credit-card": "credit_card",
+  card: "credit_card",
 };
 
 const defaultQuickTemplates = [];
@@ -512,7 +516,7 @@ function renderBills() {
 }
 
 function renderCreditCards() {
-  const creditAccounts = state.accounts.filter((account) => account.type === "credit_card");
+  const creditAccounts = state.accounts.filter(isCreditCardAccount);
   const selectedAccount = creditAccounts.find((account) => account.id === selectedCreditAccountId);
   const overview = document.querySelector("#creditOverview");
   const detail = document.querySelector("#creditDetail");
@@ -762,7 +766,7 @@ function saveInstallmentTransactions(form, currency) {
   const count = Math.min(60, Math.max(2, Number(form.installmentCount.value || 2)));
   const totalAmount = Number(form.amount.value);
   const account = findAccount(form.accountId.value || defaultAccountId());
-  if (!account || account.type !== "credit_card") {
+  if (!isCreditCardAccount(account)) {
     toast("请选择信用卡钱包后再使用分期");
     updateInstallmentFields();
     return;
@@ -1168,7 +1172,7 @@ function resetTransactionForm() {
 function canUseInstallment() {
   const form = el.transactionForm;
   const account = findAccount(form.accountId.value || defaultAccountId());
-  return selectedType === "expense" && account?.type === "credit_card" && !form.id.value;
+  return selectedType === "expense" && isCreditCardAccount(account) && !form.id.value;
 }
 
 function updateInstallmentFields() {
@@ -1551,7 +1555,7 @@ function renderRankItem(row) {
 
 function renderAccountItem({ account, balances, index, total }) {
   const meta = getAccountVisual(account);
-  const isCreditCard = account.type === "credit_card";
+  const isCreditCard = isCreditCardAccount(account);
   const primaryBalance = balances[0] || { currency: account.currency || "CNY", value: 0 };
   const outstanding = isCreditCard ? Math.max(0, -primaryBalance.value) : 0;
   const availableCredit = isCreditCard ? Math.max(0, Number(account.creditLimit || 0) - outstanding) : 0;
@@ -1585,6 +1589,14 @@ function renderAccountItem({ account, balances, index, total }) {
 
 function getAccountVisual(account) {
   return accountTypes[account.type] || accountTypes.other;
+}
+
+function isCreditCardAccount(account) {
+  if (!account) return false;
+  const normalizedType = accountTypeAliases[account.type] || account.type;
+  return normalizedType === "credit_card" ||
+    Number(account.creditLimit || 0) > 0 ||
+    /信用卡|credit\s*card/i.test(account.name || "");
 }
 
 function renderCategoryItem(item) {
@@ -1910,10 +1922,7 @@ function migrateState(savedState) {
   if (!Array.isArray(savedState.accounts) || !savedState.accounts.length) savedState.accounts = defaultAccounts;
   savedState.accounts = savedState.accounts.map((account) => {
     const normalizedType = accountTypeAliases[account.type] || account.type;
-    const looksLikeCreditCard =
-      normalizedType === "other" &&
-      (Number(account.creditLimit || 0) > 0 || /信用卡|credit\s*card/i.test(account.name || ""));
-    const type = looksLikeCreditCard ? "credit_card" : accountTypes[normalizedType] ? normalizedType : "other";
+    const type = isCreditCardAccount(account) ? "credit_card" : accountTypes[normalizedType] ? normalizedType : "other";
     const legacyCurrency = supportedCurrencies.includes(account.currency) ? account.currency : "CNY";
     const rawBalances = Array.isArray(account.balances) && account.balances.length
       ? account.balances
