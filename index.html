@@ -230,6 +230,7 @@
               <select id="categoryFilter"></select>
               <select id="accountFilter"></select>
             </div>
+            <div class="bill-summary" id="billSummary"></div>
             <div class="bulk-toolbar" id="bulkToolbar">
               <label class="checkbox-line">
                 <input id="selectAllBills" type="checkbox" />
@@ -246,21 +247,51 @@
         </section>
 
         <section class="view" id="creditView">
-          <div class="content-grid two-col">
-            <section class="panel">
-              <div class="panel-heading">
-                <h2>信用卡分期</h2>
-                <span class="panel-note" id="installmentSummary">0 个分期计划</span>
+          <section class="panel credit-overview" id="creditOverview">
+            <div class="panel-heading">
+              <div>
+                <h2>信用卡</h2>
+                <span class="panel-note" id="creditCardSummary">0 张信用卡</span>
               </div>
-              <div class="installment-plan-list" id="installmentPlanList"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-heading">
-                <h2>本月信用卡账单</h2>
+            </div>
+            <div class="credit-card-grid" id="creditCardList"></div>
+          </section>
+
+          <section class="credit-detail" id="creditDetail" hidden>
+            <div class="panel credit-detail-hero">
+              <button class="secondary-button" type="button" onclick="showCreditCardList()">返回信用卡列表</button>
+              <div class="credit-detail-main">
+                <span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>
+                <div>
+                  <h2 id="creditDetailTitle">信用卡</h2>
+                  <p id="creditDetailMeta"></p>
+                </div>
               </div>
-              <div class="bill-list" id="creditBillList"></div>
-            </section>
-          </div>
+              <div class="credit-detail-balance" id="creditDetailBalance"></div>
+            </div>
+            <div class="content-grid two-col">
+              <section class="panel">
+                <div class="panel-heading">
+                  <h2>信用卡分期</h2>
+                  <span class="panel-note" id="installmentSummary">0 个分期计划</span>
+                </div>
+                <div class="installment-plan-list" id="installmentPlanList"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <h2 id="creditBillTitle">信用卡账单</h2>
+                    <span class="panel-note" id="creditBillSummary">0 笔账单</span>
+                  </div>
+                  <label class="credit-period-picker">
+                    账单期
+                    <input id="creditBillMonth" type="month" />
+                  </label>
+                </div>
+                <div class="bill-list" id="creditBillList"></div>
+              </section>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="categoriesView">

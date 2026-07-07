@@ -63,12 +63,17 @@ const accountTypes = {
   cash: { label: "现金", icon: "现", color: "#a87932" },
   other: { label: "其他钱包", icon: "钱", color: "#6f746d" },
 };
+const accountTypeAliases = {
+  credit: "credit_card",
+};
 
 const defaultQuickTemplates = [];
 
 let state = loadState();
 let selectedType = "expense";
 let selectedBillIds = new Set();
+let selectedCreditAccountId = "";
+let selectedCreditMonth = currentMonth;
 let currentUser = null;
 let authMode = "login";
 let cloudHydrating = false;
@@ -112,6 +117,7 @@ function init() {
   el.todayText.textContent = new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(today);
   el.monthPicker.value = state.selectedMonth || currentMonth;
   state.selectedMonth = el.monthPicker.value;
+  selectedCreditMonth = state.selectedMonth;
   bindEvents();
   resetTransactionForm();
   resetAccountForm();
@@ -128,11 +134,12 @@ function bindEvents() {
     saveState();
     renderAll();
   });
+  document.querySelector("#creditBillMonth").addEventListener("change", (event) => {
+    selectedCreditMonth = event.target.value || currentMonth;
+    renderCreditCards();
+  });
   document.querySelectorAll(".segment").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedType = button.dataset.type;
-      setType(selectedType);
-    });
+    button.addEventListener("click", () => changeTransactionType(button.dataset.type));
   });
   el.transactionForm.addEventListener("submit", saveTransaction);
   el.quickForm.addEventListener("submit", saveQuickTransaction);
@@ -436,6 +443,7 @@ function switchView(view) {
 
 function renderAll() {
   fillSelects();
+  updateInstallmentFields();
   renderDashboard();
   renderAssets();
   renderBills();
@@ -498,24 +506,49 @@ function renderBills() {
     })
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   selectedBillIds = new Set([...selectedBillIds].filter((id) => rows.some((item) => item.id === id)));
+  renderBillSummary(rows);
   renderList("billTable", rows, renderTableRow, "没有符合条件的账单");
   updateBulkToolbar(rows);
 }
 
 function renderCreditCards() {
   const creditAccounts = state.accounts.filter((account) => account.type === "credit_card");
-  const creditAccountIds = new Set(creditAccounts.map((account) => account.id));
+  const selectedAccount = creditAccounts.find((account) => account.id === selectedCreditAccountId);
+  const overview = document.querySelector("#creditOverview");
+  const detail = document.querySelector("#creditDetail");
+  setText("creditCardSummary", `${creditAccounts.length} 张信用卡`);
+  renderList("creditCardList", creditAccounts, renderCreditAccountCard, "还没有信用卡钱包");
+
+  overview.hidden = Boolean(selectedAccount);
+  detail.hidden = !selectedAccount;
+  if (!selectedAccount) {
+    selectedCreditAccountId = "";
+    setText("installmentSummary", "0 个分期计划");
+    setText("creditBillTitle", "信用卡账单");
+    setText("creditBillSummary", "0 笔账单");
+    renderList("installmentPlanList", [], renderInstallmentPlan, "请选择一张信用卡");
+    renderList("creditBillList", [], renderCreditBillItem, "请选择一张信用卡");
+    return;
+  }
+
+  document.querySelector("#creditBillMonth").value = selectedCreditMonth;
+  renderCreditDetailHeader(selectedAccount);
   const installmentBills = state.transactions
-    .filter((item) => item.installmentGroupId && creditAccountIds.has(item.accountId))
+    .filter((item) => item.installmentGroupId && item.accountId === selectedAccount.id)
     .sort((a, b) => new Date(a.date) - new Date(b.date));
   const plans = groupInstallmentBills(installmentBills);
   setText("installmentSummary", `${plans.length} 个分期计划`);
   renderList("installmentPlanList", plans, renderInstallmentPlan, "还没有信用卡分期");
 
-  const currentBills = monthTransactions()
-    .filter((item) => creditAccountIds.has(item.accountId))
+  const billPeriod = getCreditBillPeriod(selectedAccount, selectedCreditMonth);
+  const currentBills = transactionsForCreditBillPeriod(selectedAccount, selectedCreditMonth)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
-  renderList("creditBillList", currentBills, renderCreditBillItem, "本月还没有信用卡账单");
+  setText("creditBillTitle", `${formatMonthLabel(selectedCreditMonth)}信用卡账单`);
+  setText(
+    "creditBillSummary",
+    `${formatDateRange(billPeriod.start, billPeriod.end)} · ${currentBills.length} 笔账单 · 合计 ${formatCurrencyTotals(creditBillTotalByCurrency(currentBills))}`
+  );
+  renderList("creditBillList", currentBills, renderCreditBillItem, "这一期还没有信用卡账单");
 }
 
 function renderCategories() {
@@ -688,6 +721,7 @@ function saveTransaction(event) {
   const targetAccount = findAccount(form.targetAccountId.value);
   const currency = supportedCurrencies.includes(form.currency.value) ? form.currency.value : currencyForAccount(sourceAccount?.id);
   const useInstallment = canUseInstallment() && form.useInstallment.checked && !form.id.value;
+  const existingTransaction = form.id.value ? findTransaction(form.id.value) : null;
   if (selectedType === "transfer" && form.accountId.value === form.targetAccountId.value) {
     toast("转出和转入不能是同一个钱包");
     return;
@@ -715,7 +749,7 @@ function saveTransaction(event) {
     date: new Date(form.date.value).toISOString(),
     note: form.note.value.trim(),
     tags: splitTags(form.tags.value),
-    createdAt: form.id.value ? findTransaction(form.id.value).createdAt : new Date().toISOString(),
+    createdAt: existingTransaction?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   upsertTransaction(transaction);
@@ -727,8 +761,26 @@ function saveTransaction(event) {
 function saveInstallmentTransactions(form, currency) {
   const count = Math.min(60, Math.max(2, Number(form.installmentCount.value || 2)));
   const totalAmount = Number(form.amount.value);
+  const account = findAccount(form.accountId.value || defaultAccountId());
+  if (!account || account.type !== "credit_card") {
+    toast("请选择信用卡钱包后再使用分期");
+    updateInstallmentFields();
+    return;
+  }
+  if (!totalAmount || totalAmount <= 0) {
+    toast("请输入有效的分期总金额");
+    return;
+  }
+  if (!form.categoryId.value) {
+    toast("请选择分期分类");
+    return;
+  }
   const baseAmount = Math.floor((totalAmount / count) * 100) / 100;
   const date = new Date(form.installmentStartDate.value || form.date.value);
+  if (Number.isNaN(date.getTime())) {
+    toast("请选择首期日期");
+    return;
+  }
   const groupId = crypto.randomUUID();
   const now = new Date().toISOString();
   const note = form.note.value.trim() || "信用卡分期";
@@ -894,6 +946,17 @@ function editTransaction(id) {
   form.note.value = item.note;
   updateInstallmentFields();
   switchView("add");
+}
+
+function selectCreditAccount(id) {
+  if (!findAccount(id)) return;
+  selectedCreditAccountId = id;
+  renderCreditCards();
+}
+
+function showCreditCardList() {
+  selectedCreditAccountId = "";
+  renderCreditCards();
 }
 
 function deleteTransaction(id) {
@@ -1236,6 +1299,16 @@ function resetCategoryForm() {
   document.querySelector("#categoryFormTitle").textContent = "新增分类";
 }
 
+function changeTransactionType(type) {
+  const form = el.transactionForm;
+  const editingTransaction = form.id.value ? findTransaction(form.id.value) : null;
+  if (editingTransaction && editingTransaction.type !== type) {
+    form.id.value = "";
+    toast("已切换为新账单，原账单会保留");
+  }
+  setType(type);
+}
+
 function setType(type) {
   selectedType = type;
   document.querySelectorAll(".segment").forEach((button) => button.classList.toggle("active", button.dataset.type === type));
@@ -1262,10 +1335,11 @@ function fillSelects() {
 
 function fillCategorySelect(select, type) {
   const selected = select.value;
-  select.innerHTML = enabledCategories(type)
+  const categories = enabledCategories(type);
+  select.innerHTML = categories
     .map((item) => `<option value="${item.id}">${item.name}</option>`)
     .join("");
-  if (selected) select.value = selected;
+  select.value = categories.some((item) => item.id === selected) ? selected : categories[0]?.id || "";
 }
 
 function fillCategoryFilter() {
@@ -1282,7 +1356,7 @@ function fillAccountSelect(select) {
   select.innerHTML = state.accounts
     .map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${accountCurrencies(item).join("/")}</option>`)
     .join("");
-  if (selected) select.value = selected;
+  select.value = state.accounts.some((item) => item.id === selected) ? selected : state.accounts[0]?.id || "";
 }
 
 function fillTransactionCurrencySelect() {
@@ -1317,6 +1391,19 @@ function fillAccountFilter() {
 function renderList(id, rows, renderer, emptyText) {
   const target = document.querySelector(`#${id}`);
   target.innerHTML = rows.length ? rows.map(renderer).join("") : `<div class="empty">${emptyText}</div>`;
+}
+
+function renderBillSummary(rows) {
+  document.querySelector("#billSummary").innerHTML = [
+    ["支出合计", formatCurrencyTotals(sumByCurrency(rows, "expense")), "expense"],
+    ["收入合计", formatCurrencyTotals(sumByCurrency(rows, "income")), "income"],
+    ["净额", formatCurrencyTotals(netByCurrency(rows)), "balance"],
+  ]
+    .map(([label, value, type]) => `<div class="bill-summary-item">
+      <span>${label}</span>
+      <strong class="summary-${type}">${value}</strong>
+    </div>`)
+    .join("");
 }
 
 function renderBillItem(item) {
@@ -1356,28 +1443,70 @@ function renderCreditBillItem(item) {
   </div>`;
 }
 
+function renderCreditAccountCard(account) {
+  const balances = getAccountBalances(account.id);
+  const primaryBalance = balances[0] || { currency: account.currency || "CNY", value: 0 };
+  const outstanding = Math.max(0, -primaryBalance.value);
+  const availableCredit = Math.max(0, Number(account.creditLimit || 0) - outstanding);
+  const currentBills = transactionsForCreditBillPeriod(account, selectedCreditMonth).length;
+  const planCount = groupInstallmentBills(
+    state.transactions.filter((item) => item.installmentGroupId && item.accountId === account.id)
+  ).length;
+  return `<article class="credit-account-card">
+    <div class="credit-account-head">
+      <span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>
+      <div class="item-main">
+        <strong>${escapeHtml(account.name)}</strong>
+        <span>账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日</span>
+      </div>
+    </div>
+    <div class="credit-account-balance">
+      ${balances.map(({ currency, value }) => `<div><span>待还款 ${currency}</span><strong>${money(Math.max(0, -value), currency)}</strong></div>`).join("")}
+    </div>
+    <div class="credit-account-meta">
+      <span>可用 ${money(availableCredit, primaryBalance.currency)}</span>
+      <span>${planCount} 个分期</span>
+      <span>该期 ${currentBills} 笔</span>
+    </div>
+    <button class="secondary-button" type="button" onclick="selectCreditAccount('${account.id}')">查看这张卡</button>
+  </article>`;
+}
+
+function renderCreditDetailHeader(account) {
+  const balances = getAccountBalances(account.id);
+  const primaryBalance = balances[0] || { currency: account.currency || "CNY", value: 0 };
+  const outstanding = Math.max(0, -primaryBalance.value);
+  const availableCredit = Math.max(0, Number(account.creditLimit || 0) - outstanding);
+  setText("creditDetailTitle", account.name);
+  setText("creditDetailMeta", `账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`);
+  document.querySelector("#creditDetailBalance").innerHTML = balances
+    .map(({ currency, value }) => `<div><span>待还款 ${currency}</span><strong>${money(Math.max(0, -value), currency)}</strong></div>`)
+    .join("");
+}
+
 function renderInstallmentPlan(plan) {
   const paidCount = plan.items.filter((item) => new Date(item.date) <= today).length;
+  const firstAmount = plan.items[0]?.amount || 0;
   return `<article class="installment-plan">
     <div class="installment-plan-head">
       <div>
         <strong>${escapeHtml(plan.title)}</strong>
-        <span>${escapeHtml(accountName(plan.accountId))} · ${plan.items.length} 期 · 已到 ${paidCount} 期</span>
+        <span>${escapeHtml(accountName(plan.accountId))} · ${plan.items.length} 期 · 已到 ${paidCount} 期 · 每期约 ${money(firstAmount, plan.currency)}</span>
       </div>
-      <strong>${money(plan.total, plan.currency)}</strong>
+      <strong>总计 ${money(plan.total, plan.currency)}</strong>
     </div>
     <div class="installment-period-list">
-      ${plan.items.map(renderInstallmentPeriod).join("")}
+      ${plan.items.map((item) => renderInstallmentPeriod(item, plan.total)).join("")}
     </div>
   </article>`;
 }
 
-function renderInstallmentPeriod(item) {
+function renderInstallmentPeriod(item, planTotal = item.installmentTotal || 0) {
   const due = new Date(item.date) <= today;
   return `<div class="installment-period">
     <div class="item-main">
       <strong>第 ${item.installmentIndex || "-"} 期</strong>
-      <span>${formatDate(item.date)} · ${due ? "已到期" : "未到期"}</span>
+      <span>${formatDate(item.date)} · ${due ? "已到期" : "未到期"} · 总额 ${money(planTotal, transactionCurrency(item))}</span>
     </div>
     <strong class="amount-expense">-${money(item.amount, transactionCurrency(item))}</strong>
     <div class="row-actions">
@@ -1510,6 +1639,26 @@ function monthTransactions() {
 
 function transactionsForMonth(month) {
   return state.transactions.filter((item) => item.date.slice(0, 7) === month);
+}
+
+function transactionsForCreditBillPeriod(account, month) {
+  const period = getCreditBillPeriod(account, month);
+  return state.transactions
+    .filter((item) => item.accountId === account.id)
+    .filter((item) => {
+      const date = new Date(item.date);
+      return date >= period.start && date < period.endExclusive;
+    });
+}
+
+function getCreditBillPeriod(account, month) {
+  const [year, monthIndex] = (month || currentMonth).split("-").map(Number);
+  const billingDay = Math.min(28, Math.max(1, Number(account.billingDay || 1)));
+  const end = new Date(year, monthIndex - 1, billingDay, 23, 59, 59, 999);
+  const start = new Date(year, monthIndex - 2, billingDay + 1, 0, 0, 0, 0);
+  const endExclusive = new Date(end);
+  endExclusive.setMilliseconds(endExclusive.getMilliseconds() + 1);
+  return { start, end, endExclusive };
 }
 
 function getCategoryExpenseTotals(transactions, selectedCurrency = null) {
@@ -1652,6 +1801,15 @@ function netByCurrency(transactions) {
   }, new Map());
 }
 
+function creditBillTotalByCurrency(transactions) {
+  return transactions.reduce((totals, item) => {
+    const currency = transactionCurrency(item);
+    const direction = item.type === "income" ? -1 : 1;
+    totals.set(currency, (totals.get(currency) || 0) + item.amount * direction);
+    return totals;
+  }, new Map());
+}
+
 function formatCurrencyTotals(totals) {
   const entries = sortedCurrencyEntries(totals);
   return entries.length ? entries.map(([currency, value]) => money(value, currency)).join(" · ") : money(0, "CNY");
@@ -1751,7 +1909,11 @@ function migrateState(savedState) {
   }));
   if (!Array.isArray(savedState.accounts) || !savedState.accounts.length) savedState.accounts = defaultAccounts;
   savedState.accounts = savedState.accounts.map((account) => {
-    const type = accountTypes[account.type] ? account.type : "other";
+    const normalizedType = accountTypeAliases[account.type] || account.type;
+    const looksLikeCreditCard =
+      normalizedType === "other" &&
+      (Number(account.creditLimit || 0) > 0 || /信用卡|credit\s*card/i.test(account.name || ""));
+    const type = looksLikeCreditCard ? "credit_card" : accountTypes[normalizedType] ? normalizedType : "other";
     const legacyCurrency = supportedCurrencies.includes(account.currency) ? account.currency : "CNY";
     const rawBalances = Array.isArray(account.balances) && account.balances.length
       ? account.balances
@@ -1839,6 +2001,16 @@ function typeLabel(type) {
 
 function formatDate(value) {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function formatDateRange(start, end) {
+  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" });
+  return `${formatter.format(start)} - ${formatter.format(end)}`;
+}
+
+function formatMonthLabel(month) {
+  const [year, monthIndex] = (month || currentMonth).split("-");
+  return `${year}年${monthIndex}月`;
 }
 
 function toMonth(date) {

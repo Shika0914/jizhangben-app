@@ -590,6 +590,7 @@ input[type="color"]::-moz-color-swatch {
 
 .panel-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1102,6 +1103,45 @@ label {
   margin-bottom: 12px;
 }
 
+.bill-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bill-summary-item {
+  display: grid;
+  gap: 5px;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.bill-summary-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bill-summary-item strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-expense {
+  color: var(--danger);
+}
+
+.summary-income {
+  color: var(--green);
+}
+
+.summary-balance {
+  color: var(--text);
+}
+
 .bulk-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1157,6 +1197,111 @@ label {
   display: grid;
   justify-items: end;
   gap: 6px;
+}
+
+.credit-overview,
+.credit-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.credit-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.credit-account-card {
+  display: grid;
+  gap: 14px;
+  min-height: 220px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.credit-account-head,
+.credit-detail-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.credit-account-balance,
+.credit-detail-balance {
+  display: grid;
+  gap: 8px;
+}
+
+.credit-account-balance div,
+.credit-detail-balance div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.credit-account-balance span,
+.credit-detail-balance span,
+.credit-account-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.credit-account-balance strong,
+.credit-detail-balance strong {
+  color: var(--danger);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.credit-account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.credit-account-meta span {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--text);
+}
+
+.credit-detail-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(180px, auto);
+  align-items: center;
+  gap: 16px;
+}
+
+.credit-detail-main h2 {
+  margin: 0;
+}
+
+.credit-detail-main p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.credit-period-picker {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.credit-period-picker input {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.78);
+  font: inherit;
 }
 
 .installment-plan-list {
@@ -1450,6 +1595,10 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .credit-detail-hero {
+    grid-template-columns: 1fr;
+  }
+
   .table-row,
   .filter-bar {
     grid-template-columns: 1fr;
@@ -1492,6 +1641,8 @@ label {
   }
 
   .metric-grid,
+  .bill-summary,
+  .credit-card-grid,
   .form-grid,
   .compact-form,
   .balance-row,
@@ -1540,6 +1691,10 @@ label {
   .account-item .row-actions {
     grid-column: 2 / -1;
     justify-content: flex-start;
+  }
+
+  .credit-period-picker {
+    width: 100%;
   }
 
   .modal-backdrop {
