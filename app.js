@@ -855,8 +855,8 @@ function saveAccount(event) {
   const form = el.accountForm;
   const name = form.name.value.trim();
   const isCreditCard = form.type.value === "credit_card";
-  const balances = readAccountBalanceRows(isCreditCard);
-  if (!balances.length) {
+  const enteredBalances = readAccountBalanceRows(isCreditCard);
+  if (!enteredBalances.length) {
     toast("请至少保留一个币种余额");
     return;
   }
@@ -868,6 +868,10 @@ function saveAccount(event) {
     return;
   }
 
+  const existingAccount = form.id.value ? findAccount(form.id.value) : null;
+  const balances = existingAccount
+    ? currentBalancesToInitialBalances(existingAccount.id, enteredBalances)
+    : enteredBalances;
   const account = {
     id: form.id.value || crypto.randomUUID(),
     name,
@@ -881,7 +885,6 @@ function saveAccount(event) {
     includeInAssets: form.includeInAssets.checked,
   };
   const index = state.accounts.findIndex((item) => item.id === account.id);
-  const existingAccount = index >= 0 ? state.accounts[index] : null;
   const hasTransactions = existingAccount && state.transactions.some(
     (item) => item.accountId === account.id || item.targetAccountId === account.id
   );
@@ -1071,7 +1074,10 @@ function editAccount(id) {
   form.creditLimit.value = account.creditLimit || 0;
   form.billingDay.value = account.billingDay || 1;
   form.dueDay.value = account.dueDay || 20;
-  renderAccountBalanceRows(account.balances || accountBalances(account.id), account.type === "credit_card");
+  renderAccountBalanceRows(
+    getAccountBalances(account.id).map(({ currency, value }) => ({ currency, initialBalance: value })),
+    account.type === "credit_card"
+  );
   form.includeInAssets.checked = account.includeInAssets;
   document.querySelector("#accountFormTitle").textContent = "编辑钱包";
   showAccountModal();
@@ -1240,7 +1246,7 @@ function accountBalanceRowTemplate(balance, isCreditCard) {
     <select name="balanceCurrency" aria-label="币种">
       ${supportedCurrencies.map((currency) => `<option value="${currency}" ${currency === balance.currency ? "selected" : ""}>${currencyNames[currency] || currency} ${currency}</option>`).join("")}
     </select>
-    <input name="balanceAmount" type="number" step="0.01" value="${amount}" aria-label="${isCreditCard ? "当前欠款" : "期初余额"}" />
+    <input name="balanceAmount" type="number" step="0.01" value="${amount}" aria-label="${isCreditCard ? "当前欠款" : "当前余额"}" />
     <button class="icon-button danger-button" type="button" onclick="removeAccountBalanceRow(this)" title="删除币种" aria-label="删除币种"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
   </div>`;
 }
@@ -1754,6 +1760,10 @@ function getAccountBalanceByCurrency(id, currency) {
   const account = findAccount(id);
   if (!account) return 0;
   const balance = accountBalances(id).find((item) => item.currency === currency);
+  return Number(balance?.initialBalance || 0) + getAccountTransactionImpactByCurrency(id, currency);
+}
+
+function getAccountTransactionImpactByCurrency(id, currency) {
   return state.transactions.reduce((balance, item) => {
     if (transactionCurrency(item) !== currency) return balance;
     if (item.type === "expense" && item.accountId === id) return balance - item.amount;
@@ -1763,7 +1773,14 @@ function getAccountBalanceByCurrency(id, currency) {
       if (item.targetAccountId === id) balance += item.amount;
     }
     return balance;
-  }, Number(balance?.initialBalance || 0));
+  }, 0);
+}
+
+function currentBalancesToInitialBalances(id, balances) {
+  return balances.map((balance) => ({
+    ...balance,
+    initialBalance: Number(balance.initialBalance || 0) - getAccountTransactionImpactByCurrency(id, balance.currency),
+  }));
 }
 
 function getAccountBalances(id) {
@@ -1934,11 +1951,12 @@ function migrateState(savedState) {
     const balances = rawBalances
       .map((balance) => {
         const currency = supportedCurrencies.includes(balance.currency) ? balance.currency : legacyCurrency;
+        const numericInitial = Number(balance.initialBalance || 0);
         return {
           currency,
-          initialBalance: type === "credit_card"
-            ? -Math.abs(Number(balance.initialBalance || 0))
-            : Number(balance.initialBalance || 0),
+          initialBalance: type === "credit_card" && normalizedType !== "credit_card"
+            ? -Math.abs(numericInitial)
+            : numericInitial,
         };
       })
       .filter((balance) => {
