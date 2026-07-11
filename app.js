@@ -470,7 +470,8 @@ function renderDashboard() {
   setText("todayExpense", formatCurrencyTotals(sumByCurrency(todayTransactions, "expense")));
   renderDashboardAssetTotals(getTotalAssetsByCurrency());
 
-  const recent = [...state.transactions]
+  const recent = state.transactions
+    .filter(isPostedTransaction)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 6);
   renderList("recentBills", recent, renderBillItem, "还没有账单");
@@ -1660,6 +1661,10 @@ function monthTransactions() {
 
 function transactionsForMonth(month) {
   return state.transactions.filter((item) => item.date.slice(0, 7) === month);
+}
+
+function isPostedTransaction(item) {
+  return new Date(item.date) <= new Date();
 }
 
 function transactionsForCreditBillPeriod(account, month) {
