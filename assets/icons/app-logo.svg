@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" shape-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="iconSurface" x1="12" y1="5" x2="51" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#55B7A9"/>
+      <stop offset="0.48" stop-color="#1B8277"/>
+      <stop offset="1" stop-color="#0A514A"/>
+    </linearGradient>
+    <linearGradient id="glassSheen" x1="18" y1="5" x2="40" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.58"/>
+      <stop offset="0.58" stop-color="white" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="pageSurface" x1="19" y1="14" x2="45" y2="51" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.96"/>
+      <stop offset="0.55" stop-color="#EDF8F5" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#C9E4DE" stop-opacity="0.84"/>
+    </linearGradient>
+    <linearGradient id="goldSpine" x1="22" y1="15" x2="27" y2="51" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5DE94"/>
+      <stop offset="0.45" stop-color="#D9B45D"/>
+      <stop offset="1" stop-color="#A8792F"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="3" y="4" width="58" height="58" rx="14" fill="#063F39" fill-opacity="0.34"/>
+  <g>
+    <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#iconSurface)"/>
+    <rect x="2.7" y="2.7" width="58.6" height="58.6" rx="14.3" stroke="white" stroke-opacity="0.42" stroke-width="1.4"/>
+    <path d="M7 22C7 12.6 14.6 5 24 5h17.5C50.6 5 58 12.4 58 21.5V29c-10-5.2-22.7-6.3-34.5-3.5C16.8 27.1 11.2 26 7 22Z" fill="url(#glassSheen)"/>
+    <path d="M10.2 52.5c11.9 5.8 29.8 5.5 43.8-1.4" stroke="#063F39" stroke-opacity="0.23" stroke-width="1.2" stroke-linecap="round"/>
+  </g>
+
+  <g>
+    <rect x="15" y="14" width="33" height="39" rx="6" fill="#063F39" fill-opacity="0.42"/>
+    <rect x="14.5" y="13.5" width="32" height="39" rx="6" fill="#0A544C" fill-opacity="0.58" stroke="white" stroke-opacity="0.3"/>
+    <rect x="17.5" y="11.5" width="31" height="40" rx="6" fill="url(#pageSurface)" stroke="white" stroke-opacity="0.88" stroke-width="1.4"/>
+    <path d="M24.5 13.5V49.5" stroke="url(#goldSpine)" stroke-width="4.4" stroke-linecap="round"/>
+    <path d="M25.5 14.5V48.5" stroke="white" stroke-opacity="0.48" stroke-width="0.9" stroke-linecap="round"/>
+    <path d="M31 23.5H41M31 31.5H43M31 39.5H38.5" stroke="#155F56" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M31 22.7H41M31 30.7H43M31 38.7H38.5" stroke="white" stroke-opacity="0.62" stroke-width="0.8" stroke-linecap="round"/>
+    <circle cx="42.5" cy="40.5" r="2.5" fill="url(#goldSpine)"/>
+    <circle cx="41.9" cy="39.8" r="0.7" fill="white" fill-opacity="0.72"/>
+  </g>
+</svg>

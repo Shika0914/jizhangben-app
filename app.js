@@ -1,5 +1,6 @@
 const STORAGE_KEY = "jizhangben-state-v2";
 const CLOUD_DIRTY_KEY = "jizhangben-cloud-dirty-v1";
+const LOGO_STYLE_KEY = "jizhangben-logo-style-v1";
 const LEGACY_STORAGE_KEYS = ["qingzhang-state-v1", "jizhangben-state-v1"];
 const SUPABASE_URL = "https://wulhenvzdeduozvcshwt.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_qZXvz91fUAR7C3gO-RCcrw_ehAiHYMw";
@@ -7,6 +8,10 @@ const SITE_URL = "https://shika0914.github.io/jizhangben-app/";
 const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
 const today = new Date();
 const currentMonth = toMonth(today);
+const logoStyles = {
+  simple: { label: "简约", src: "./assets/icons/app-logo-simple.svg?v=1" },
+  embossed: { label: "立体", src: "./assets/icons/app-logo.svg?v=3" },
+};
 
 const supportedCurrencies = ["CNY", "USD", "EUR", "GBP", "JPY", "HKD", "TWD", "KRW", "SGD", "AUD", "CAD"];
 const currencyNames = {
@@ -73,6 +78,38 @@ const accountTypeAliases = {
 
 const defaultQuickTemplates = [];
 
+const categoryIconSvgs = {
+  utensils: '<path d="M3 2v7a4 4 0 0 0 8 0V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6a2 2 0 0 0 2 2h3Zm0 0v7"/>',
+  car: '<path d="M5 11 7 6h10l2 5M3 11h18l-2 6H5l-2-6Z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/>',
+  "shopping-bag": '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4ZM3 6h18M16 10a4 4 0 0 1-8 0"/>',
+  house: '<path d="m3 11 9-9 9 9M5 10v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V10M9 22V12h6v10"/>',
+  gamepad: '<rect x="2.5" y="6" width="19" height="13" rx="6"/><path d="M7 10v5M4.5 12.5h5M16.5 10.5h.01M19 13h.01"/>',
+  "heart-pulse": '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/><path d="M3.5 12H8l2-3 3 6 2-3h5.5"/>',
+  "graduation-cap": '<path d="m2 10 10-5 10 5-10 5L2 10Z"/><path d="M6 12v5c3 2 9 2 12 0v-5M22 10v6"/>',
+  package: '<path d="m16.5 9.4-9-5.2M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
+  wallet: '<path d="M20 7V5a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v10a2 2 0 0 1-2 2H5a3 3 0 0 1-3-3V6"/><path d="M16 13h4"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7M7.5 8C5 8 4 6.5 4 5.5S5 3 6.5 3C9 3 12 8 12 8s3-5 5.5-5C19 3 20 4.5 20 5.5S19 8 16.5 8"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2"/>',
+  "chart-line": '<path d="M3 3v18h18M7 16l4-5 4 3 5-7"/>',
+  plane: '<path d="M22 2 9 15M22 2l-7 20-4-9-9-4 20-7Z"/>',
+  coffee: '<path d="M5 7h14l-1.5 14h-11L5 7ZM4 3h16M14 7l2-5M8 12h8"/>',
+  dumbbell: '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2M9 11l-3.5 6.5M13 8l-2-2H8"/>',
+  ellipsis: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+};
+
+const categoryIconOptions = [
+  ["utensils", "餐饮"], ["car", "交通"], ["shopping-bag", "购物"], ["house", "住房"],
+  ["gamepad", "娱乐"], ["heart-pulse", "医疗"], ["graduation-cap", "教育"], ["package", "日用品"],
+  ["wallet", "收入"], ["gift", "奖金"], ["briefcase", "工作"], ["chart-line", "投资"],
+  ["plane", "旅行"], ["coffee", "饮料"], ["dumbbell", "运动"], ["ellipsis", "其他"],
+];
+
+const defaultCategoryIconKeys = {
+  food: "utensils", transport: "car", shopping: "shopping-bag", housing: "house", fun: "gamepad",
+  medical: "heart-pulse", education: "graduation-cap", daily: "package", salary: "wallet", bonus: "gift",
+  side: "briefcase", investment: "chart-line", "other-expense": "ellipsis", "other-income": "ellipsis",
+};
+
 let state = loadState();
 let selectedType = "expense";
 let selectedBillIds = new Set();
@@ -84,6 +121,7 @@ let cloudHydrating = false;
 let cloudSaveTimer = null;
 let cloudLoadedForUser = "";
 let draggedAccountId = "";
+let statsReportMode = "month";
 
 const el = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -96,6 +134,13 @@ const el = {
   quickTemplateForm: document.querySelector("#quickTemplateForm"),
   accountForm: document.querySelector("#accountForm"),
   statsCurrency: document.querySelector("#statsCurrency"),
+  statsWeekDate: document.querySelector("#statsWeekDate"),
+  statsMonthValue: document.querySelector("#statsMonthValue"),
+  statsYearValue: document.querySelector("#statsYearValue"),
+  appLogo: document.querySelector("#appLogo"),
+  appFavicon: document.querySelector("#appFavicon"),
+  logoPickerButton: document.querySelector("#logoPickerButton"),
+  logoPickerMenu: document.querySelector("#logoPickerMenu"),
   accountModal: document.querySelector("#accountModal"),
   authModal: document.querySelector("#authModal"),
   authForm: document.querySelector("#authForm"),
@@ -110,7 +155,7 @@ const viewTitles = {
   add: "记一笔",
   bills: "账单",
   credit: "信用卡",
-  categories: "分类",
+  categories: "新增分类",
   stats: "统计",
 };
 
@@ -118,17 +163,33 @@ init();
 initCloud();
 
 function init() {
+  applyLogoStyle(loadLogoStyle());
   el.todayText.textContent = new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(today);
   el.monthPicker.value = state.selectedMonth || currentMonth;
   state.selectedMonth = el.monthPicker.value;
   selectedCreditMonth = state.selectedMonth;
+  el.statsWeekDate.value = toDateInput(today);
+  el.statsMonthValue.value = state.selectedMonth;
+  el.statsYearValue.value = String(today.getFullYear());
   bindEvents();
   resetTransactionForm();
   resetAccountForm();
+  renderCategoryIconPicker();
+  updateCategoryPreview();
   renderAll();
 }
 
 function bindEvents() {
+  el.logoPickerButton.addEventListener("click", toggleLogoPicker);
+  document.querySelectorAll("[data-logo-style]").forEach((button) => {
+    button.addEventListener("click", () => selectLogoStyle(button.dataset.logoStyle));
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".brand-logo-control")) closeLogoPicker();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeLogoPicker();
+  });
   el.tabs.forEach((tab) => tab.addEventListener("click", () => switchView(tab.dataset.view)));
   document.querySelectorAll("[data-view-jump]").forEach((button) => {
     button.addEventListener("click", () => switchView(button.dataset.viewJump));
@@ -163,7 +224,19 @@ function bindEvents() {
   });
   document.querySelector("#addAccountBalance").addEventListener("click", () => addAccountBalanceRow());
   el.statsCurrency.addEventListener("change", renderStats);
+  document.querySelectorAll("[data-stats-mode]").forEach((button) => {
+    button.addEventListener("click", () => changeStatsReportMode(button.dataset.statsMode));
+  });
+  [el.statsWeekDate, el.statsMonthValue, el.statsYearValue].forEach((field) => {
+    field.addEventListener("change", renderStats);
+  });
   el.categoryForm.addEventListener("submit", saveCategory);
+  [el.categoryForm.name, el.categoryForm.color].forEach((field) => {
+    field.addEventListener("input", updateCategoryPreview);
+  });
+  el.categoryForm.customIcon.addEventListener("input", updateCustomCategoryIcon);
+  el.categoryForm.type.addEventListener("change", updateCategoryPreview);
+  el.categoryForm.enabled.addEventListener("change", updateCategoryPreview);
   el.authForm.addEventListener("submit", submitAuthForm);
   document.querySelector("#openAuthModal").addEventListener("click", () => openAuthModal("login"));
   document.querySelector("#closeAuthModal").addEventListener("click", closeAuthModal);
@@ -201,6 +274,50 @@ function bindEvents() {
   ["billSearch", "typeFilter", "categoryFilter", "accountFilter"].forEach((id) => {
     document.querySelector(`#${id}`).addEventListener("input", renderBills);
   });
+}
+
+function loadLogoStyle() {
+  try {
+    const stored = localStorage.getItem(LOGO_STYLE_KEY);
+    return logoStyles[stored] ? stored : "embossed";
+  } catch {
+    return "embossed";
+  }
+}
+
+function applyLogoStyle(style) {
+  const selected = logoStyles[style] ? style : "embossed";
+  const config = logoStyles[selected];
+  el.appLogo.src = config.src;
+  el.appFavicon.href = config.src;
+  document.querySelectorAll("[data-logo-style]").forEach((button) => {
+    const active = button.dataset.logoStyle === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", String(active));
+  });
+}
+
+function selectLogoStyle(style) {
+  if (!logoStyles[style]) return;
+  applyLogoStyle(style);
+  try {
+    localStorage.setItem(LOGO_STYLE_KEY, style);
+  } catch {
+    // The visual choice still applies for the current session.
+  }
+  closeLogoPicker();
+  toast(`已切换为${logoStyles[style].label} Logo`);
+}
+
+function toggleLogoPicker() {
+  const willOpen = el.logoPickerMenu.hidden;
+  el.logoPickerMenu.hidden = !willOpen;
+  el.logoPickerButton.setAttribute("aria-expanded", String(willOpen));
+}
+
+function closeLogoPicker() {
+  el.logoPickerMenu.hidden = true;
+  el.logoPickerButton.setAttribute("aria-expanded", "false");
 }
 
 async function initCloud() {
@@ -442,10 +559,13 @@ function friendlyAuthError(error) {
 }
 
 function switchView(view) {
-  el.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
+  const activeNavView = ["add", "categories"].includes(view) ? "bills" : view;
+  el.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === activeNavView));
   el.views.forEach((item) => item.classList.toggle("active", item.id === `${view}View`));
   el.viewTitle.textContent = viewTitles[view];
-  document.querySelector(".month-control").hidden = view === "assets";
+  const hideMonthPicker = ["assets", "add", "categories", "stats"].includes(view);
+  document.querySelector(".month-control").hidden = hideMonthPicker;
+  document.querySelector(".topbar").classList.toggle("is-simple", hideMonthPicker);
 }
 
 function renderAll() {
@@ -566,16 +686,21 @@ function renderCategories() {
 
 function renderStats() {
   const currency = el.statsCurrency.value || "CNY";
-  const transactions = monthTransactions().filter((item) => transactionCurrency(item) === currency);
+  const period = getStatsReportPeriod();
+  const transactions = transactionsForDateRange(period.start, period.end)
+    .filter(isPostedTransaction)
+    .filter((item) => transactionCurrency(item) === currency);
   const expenses = transactions.filter((item) => item.type === "expense");
   const expense = sumByType(transactions, "expense");
   const income = sumByType(transactions, "income");
   const savingRate = income > 0 ? Math.round(((income - expense) / income) * 100) : 0;
   const categoryTotals = getCategoryExpenseTotals(transactions, currency);
   const largest = categoryTotals[0];
-  const biggestBill = expenses.sort((a, b) => b.amount - a.amount)[0];
+  const biggestBill = [...expenses].sort((a, b) => b.amount - a.amount)[0];
   const previousExpense = sumByType(
-    transactionsForMonth(addMonths(state.selectedMonth, -1)).filter((item) => transactionCurrency(item) === currency),
+    transactionsForDateRange(period.previousStart, period.start)
+      .filter(isPostedTransaction)
+      .filter((item) => transactionCurrency(item) === currency),
     "expense"
   );
 
@@ -583,9 +708,68 @@ function renderStats() {
   setText("largestCategory", largest ? largest.category.name : "-");
   setText("largestExpense", biggestBill ? money(biggestBill.amount, currency) : money(0, currency));
   setText("monthDelta", money(expense - previousExpense, currency));
+  setText("statsDeltaLabel", period.deltaLabel);
+  setText("statsTrendTitle", period.trendTitle);
+  setText("statsPeriodSummary", period.summary);
+  setText("statsIncomeTotal", money(income, currency));
+  setText("statsExpenseTotal", money(expense, currency));
 
-  renderDailyChart(expenses, currency);
+  renderStatsTrend(transactions, currency, period);
+  renderNetWorthTrend(currency, period);
   renderCategoryShare(categoryTotals, expense, currency);
+}
+
+function changeStatsReportMode(mode) {
+  if (!["week", "month", "year"].includes(mode)) return;
+  statsReportMode = mode;
+  document.querySelectorAll("[data-stats-mode]").forEach((button) => {
+    const active = button.dataset.statsMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelectorAll("[data-stats-period]").forEach((field) => {
+    field.hidden = field.dataset.statsPeriod !== mode;
+  });
+  renderStats();
+}
+
+function getStatsReportPeriod() {
+  if (statsReportMode === "week") {
+    const anchor = parseLocalDate(el.statsWeekDate.value) || new Date(today);
+    const start = startOfWeek(anchor);
+    const end = addDays(start, 7);
+    return {
+      mode: "week", start, end, previousStart: addDays(start, -7),
+      deltaLabel: "比上周变化", trendTitle: "本周每日收支",
+      summary: `${formatShortDate(start)} - ${formatShortDate(addDays(end, -1))}`,
+    };
+  }
+
+  if (statsReportMode === "year") {
+    const year = Math.min(2100, Math.max(2000, Number(el.statsYearValue.value) || today.getFullYear()));
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+    return {
+      mode: "year", start, end, previousStart: new Date(year - 1, 0, 1),
+      deltaLabel: "比上年变化", trendTitle: "全年每月收支", summary: `${year} 年全年`,
+    };
+  }
+
+  const month = /^\d{4}-\d{2}$/.test(el.statsMonthValue.value) ? el.statsMonthValue.value : currentMonth;
+  const [year, monthIndex] = month.split("-").map(Number);
+  const start = new Date(year, monthIndex - 1, 1);
+  const end = new Date(year, monthIndex, 1);
+  return {
+    mode: "month", start, end, previousStart: new Date(year, monthIndex - 2, 1),
+    deltaLabel: "比上月变化", trendTitle: "本月每日收支", summary: `${year} 年 ${monthIndex} 月`,
+  };
+}
+
+function transactionsForDateRange(start, end) {
+  return state.transactions.filter((item) => {
+    const date = new Date(item.date);
+    return date >= start && date < end;
+  });
 }
 
 function renderTemplates() {
@@ -682,24 +866,134 @@ function closeQuickTemplateEditor() {
   el.quickTemplateForm.reset();
 }
 
-function renderDailyChart(expenses, currency) {
-  const days = new Date(...state.selectedMonth.split("-").map((value, index) => index === 1 ? Number(value) : Number(value)), 0).getDate();
-  const totals = Array.from({ length: days }, (_, index) => ({ day: index + 1, amount: 0 }));
-  expenses.forEach((item) => {
-    const day = new Date(item.date).getDate();
-    totals[day - 1].amount += item.amount;
+function renderStatsTrend(transactions, currency, period) {
+  const totals = buildStatsBuckets(period).map((bucket) => ({ ...bucket, income: 0, expense: 0 }));
+  transactions.forEach((item) => {
+    if (!["income", "expense"].includes(item.type)) return;
+    const date = new Date(item.date);
+    const bucket = totals.find((entry) => date >= entry.start && date < entry.end);
+    if (bucket) bucket[item.type] += item.amount;
   });
-  const max = Math.max(...totals.map((item) => item.amount), 1);
-  document.querySelector("#dailyChart").innerHTML = totals
+  const max = Math.max(...totals.flatMap((item) => [item.income, item.expense]), 1);
+  const chart = document.querySelector("#dailyChart");
+  chart.className = `cashflow-chart is-${period.mode}`;
+  chart.innerHTML = totals
     .map((item) => {
-      const height = Math.max((item.amount / max) * 190, item.amount ? 8 : 4);
-      return `<div class="bar" title="${item.day}日 ${money(item.amount, currency)}"><span style="height:${height}px"></span>${item.day}</div>`;
+      const incomeHeight = Math.max((item.income / max) * 160, item.income ? 7 : 3);
+      const expenseHeight = Math.max((item.expense / max) * 160, item.expense ? 7 : 3);
+      return `<div class="cashflow-group" title="${escapeHtml(item.title)} · 收入 ${money(item.income, currency)} · 支出 ${money(item.expense, currency)}">
+        <div class="cashflow-bars">
+          <div class="cashflow-bar is-income" style="--bar-height:${incomeHeight}px">
+            ${item.income ? `<b>${compactMoney(item.income, currency)}</b>` : ""}
+            <span style="height:${incomeHeight}px"></span>
+          </div>
+          <div class="cashflow-bar is-expense" style="--bar-height:${expenseHeight}px">
+            ${item.expense ? `<b>${compactMoney(item.expense, currency)}</b>` : ""}
+            <span style="height:${expenseHeight}px"></span>
+          </div>
+        </div>
+        <small>${item.label}</small>
+      </div>`;
     })
     .join("");
 }
 
+function buildStatsBuckets(period) {
+  if (period.mode === "week") {
+    const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    return labels.map((label, index) => {
+      const start = addDays(period.start, index);
+      return { label, title: formatShortDate(start), start, end: addDays(start, 1) };
+    });
+  }
+  if (period.mode === "year") {
+    return Array.from({ length: 12 }, (_, index) => {
+      const start = new Date(period.start.getFullYear(), index, 1);
+      return { label: `${index + 1}月`, title: `${period.start.getFullYear()}年${index + 1}月`, start, end: new Date(period.start.getFullYear(), index + 1, 1) };
+    });
+  }
+  const days = new Date(period.end.getFullYear(), period.end.getMonth(), 0).getDate();
+  return Array.from({ length: days }, (_, index) => {
+    const start = new Date(period.start.getFullYear(), period.start.getMonth(), index + 1);
+    return { label: String(index + 1), title: formatShortDate(start), start, end: addDays(start, 1) };
+  });
+}
+
+function renderNetWorthTrend(currency, period) {
+  const buckets = buildStatsBuckets(period);
+  const points = [
+    { label: "期初", value: getNetAssetsAt(currency, period.start) },
+    ...buckets.map((bucket) => ({ label: bucket.label, value: getNetAssetsAt(currency, bucket.end) })),
+  ];
+  const opening = points[0].value;
+  const current = points[points.length - 1].value;
+  setText("statsNetAssetCurrent", money(current, currency));
+  setText("statsNetAssetChange", signedCompactMoney(current - opening, currency));
+
+  const width = period.mode === "month" ? Math.max(1080, points.length * 52) : 920;
+  const height = 270;
+  const padding = { top: 42, right: 30, bottom: 42, left: 78 };
+  const values = points.map((point) => point.value);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  const spread = Math.max(max - min, Math.max(Math.abs(max), 1) * 0.08, 1);
+  min -= spread * 0.18;
+  max += spread * 0.18;
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const x = (index) => padding.left + (innerWidth * index) / Math.max(points.length - 1, 1);
+  const y = (value) => padding.top + ((max - value) / Math.max(max - min, 1)) * innerHeight;
+  const linePoints = points.map((point, index) => `${x(index)},${y(point.value)}`).join(" ");
+  const areaPoints = `${padding.left},${padding.top + innerHeight} ${linePoints} ${x(points.length - 1)},${padding.top + innerHeight}`;
+  const extrema = new Set([values.indexOf(Math.min(...values)), values.indexOf(Math.max(...values)), points.length - 1]);
+  const showEvery = period.mode === "month" ? 5 : 1;
+  const grid = Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3;
+    const value = max - (max - min) * ratio;
+    const lineY = padding.top + innerHeight * ratio;
+    return `<g><line x1="${padding.left}" y1="${lineY}" x2="${width - padding.right}" y2="${lineY}" class="net-grid-line"/><text x="${padding.left - 10}" y="${lineY + 4}" text-anchor="end" class="net-axis-value">${compactMoney(value, currency)}</text></g>`;
+  }).join("");
+  const pointMarkup = points.map((point, index) => {
+    const pointX = x(index);
+    const pointY = y(point.value);
+    const showValue = index % showEvery === 0 || extrema.has(index);
+    const showLabel = period.mode !== "month" || index === 0 || index % 5 === 0 || index === points.length - 1;
+    return `<g>
+      <circle cx="${pointX}" cy="${pointY}" r="4" class="net-point"><title>${escapeHtml(point.label)} ${money(point.value, currency)}</title></circle>
+      ${showValue ? `<text x="${pointX}" y="${Math.max(16, pointY - 12)}" text-anchor="middle" class="net-point-value">${compactMoney(point.value, currency)}</text>` : ""}
+      ${showLabel ? `<text x="${pointX}" y="${height - 14}" text-anchor="middle" class="net-axis-label">${escapeHtml(point.label)}</text>` : ""}
+    </g>`;
+  }).join("");
+  document.querySelector("#netWorthChart").innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="净资产趋势图">
+    ${grid}
+    <polygon points="${areaPoints}" class="net-area"/>
+    <polyline points="${linePoints}" class="net-line"/>
+    ${pointMarkup}
+  </svg>`;
+}
+
+function getNetAssetsAt(currency, cutoff) {
+  const effectiveCutoff = cutoff > new Date() ? new Date() : cutoff;
+  const includedAccountIds = new Set(state.accounts.filter((account) => account.includeInAssets).map((account) => account.id));
+  let total = state.accounts
+    .filter((account) => includedAccountIds.has(account.id))
+    .flatMap((account) => accountBalances(account.id))
+    .filter((balance) => balance.currency === currency)
+    .reduce((sum, balance) => sum + Number(balance.initialBalance || 0), 0);
+  state.transactions.forEach((item) => {
+    const date = new Date(item.date);
+    if (Number.isNaN(date.getTime()) || date >= effectiveCutoff || transactionCurrency(item) !== currency) return;
+    if (item.type === "expense" && includedAccountIds.has(item.accountId)) total -= item.amount;
+    if (item.type === "income" && includedAccountIds.has(item.accountId)) total += item.amount;
+    if (item.type === "transfer") {
+      if (includedAccountIds.has(item.accountId)) total -= item.amount;
+      if (includedAccountIds.has(item.targetAccountId)) total += item.amount;
+    }
+  });
+  return total;
+}
+
 function renderCategoryShare(rows, total, currency) {
-  const colors = rows.map((row) => row.category.color);
   let cursor = 0;
   const segments = rows
     .map((row) => {
@@ -713,8 +1007,8 @@ function renderCategoryShare(rows, total, currency) {
   renderList(
     "categoryShare",
     rows,
-    (row, index) => `<div class="rank-item">
-      <span class="category-dot" style="background:${colors[index]}">${row.category.icon}</span>
+    (row) => `<div class="rank-item">
+      ${categoryBadge(row.category)}
       <div class="item-main"><strong>${row.category.name}</strong><span>${Math.round((row.amount / Math.max(total, 1)) * 100)}%</span></div>
       <strong>${money(row.amount, currency)}</strong>
     </div>`,
@@ -918,7 +1212,7 @@ function saveCategory(event) {
     id: form.id.value || slugify(form.name.value),
     name: form.name.value.trim(),
     type: form.type.value,
-    icon: form.icon.value.trim().slice(0, 2),
+    icon: normalizeCategoryCustomIcon(form.icon.value),
     color: form.color.value,
     sortOrder: form.id.value ? findCategory(form.id.value).sortOrder : state.categories.length + 1,
     enabled: form.enabled.checked,
@@ -1035,10 +1329,14 @@ function editCategory(id) {
   form.id.value = item.id;
   form.name.value = item.name;
   form.type.value = item.type;
-  form.icon.value = item.icon;
+  const iconKey = categoryIconKey(item);
+  form.icon.value = iconKey || item.icon;
+  form.customIcon.value = iconKey ? "" : item.icon;
   form.color.value = item.color;
   form.enabled.checked = item.enabled;
   document.querySelector("#categoryFormTitle").textContent = "编辑分类";
+  syncCategoryIconPicker();
+  updateCategoryPreview();
 }
 
 function deleteCategory(id) {
@@ -1308,9 +1606,75 @@ function closeAccountModal() {
 function resetCategoryForm() {
   el.categoryForm.reset();
   el.categoryForm.id.value = "";
+  el.categoryForm.icon.value = "utensils";
+  el.categoryForm.customIcon.value = "";
   el.categoryForm.color.value = "#0f766e";
   el.categoryForm.enabled.checked = true;
   document.querySelector("#categoryFormTitle").textContent = "新增分类";
+  syncCategoryIconPicker();
+  updateCategoryPreview();
+}
+
+function updateCategoryPreview() {
+  const form = el.categoryForm;
+  const color = form.color.value || "#247c7a";
+  const enabled = form.enabled.checked;
+  document.querySelector("#categoryPreviewIcon").innerHTML = categoryIconMarkup({ icon: form.icon.value }, "类");
+  document.querySelector("#categoryPreviewIcon").style.backgroundColor = color;
+  document.querySelector("#categoryPreviewName").textContent = form.name.value.trim() || "分类名称";
+  document.querySelector("#categoryPreviewType").textContent = `${form.type.value === "income" ? "收入" : "支出"}分类${enabled ? "" : " · 已停用"}`;
+  document.querySelector("#categoryColorValue").textContent = color.toUpperCase();
+  document.querySelector(".category-preview").classList.toggle("is-disabled", !enabled);
+}
+
+function renderCategoryIconPicker() {
+  document.querySelector("#categoryIconPicker").innerHTML = categoryIconOptions
+    .map(([key, label]) => `<button class="category-icon-option" type="button" data-icon-key="${key}" title="${label}" aria-label="${label}" aria-pressed="false" onclick="selectCategoryIcon('${key}')">${categorySvg(key)}<span>${label}</span></button>`)
+    .join("");
+  syncCategoryIconPicker();
+}
+
+function selectCategoryIcon(key) {
+  if (!categoryIconSvgs[key]) return;
+  el.categoryForm.icon.value = key;
+  el.categoryForm.customIcon.value = "";
+  syncCategoryIconPicker();
+  updateCategoryPreview();
+}
+
+function updateCustomCategoryIcon() {
+  const value = normalizeCategoryCustomIcon(el.categoryForm.customIcon.value);
+  el.categoryForm.customIcon.value = value;
+  if (value) el.categoryForm.icon.value = value;
+  else if (!categoryIconSvgs[el.categoryForm.icon.value]) el.categoryForm.icon.value = "utensils";
+  syncCategoryIconPicker();
+  updateCategoryPreview();
+}
+
+function syncCategoryIconPicker() {
+  const selected = el.categoryForm.icon.value;
+  document.querySelectorAll(".category-icon-option").forEach((button) => {
+    const active = button.dataset.iconKey === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function normalizeCategoryCustomIcon(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let graphemes;
+  try {
+    graphemes = [...new Intl.Segmenter("zh-CN", { granularity: "grapheme" }).segment(text)].map((item) => item.segment);
+  } catch {
+    graphemes = Array.from(text);
+  }
+  const first = graphemes[0] || "";
+  return isCategoryEmoji(first) ? first : graphemes.slice(0, 2).join("");
+}
+
+function isCategoryEmoji(value) {
+  return /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(String(value || ""));
 }
 
 function changeTransactionType(type) {
@@ -1625,9 +1989,31 @@ function renderCategoryItem(item) {
 
 function categoryBadge(category, fallbackType = "transfer") {
   if (!category) {
-    return `<span class="category-dot" style="background:#247c7a">${fallbackType === "transfer" ? "转" : "其"}</span>`;
+    const fallbackLabel = fallbackType === "transfer" ? "转账" : "其他";
+    return `<span class="category-dot" style="background:#247c7a" title="${fallbackLabel}" aria-hidden="true"><span class="category-letter">${fallbackType === "transfer" ? "转" : "其"}</span></span>`;
   }
-  return `<span class="category-dot" style="background:${category.color}">${category.icon}</span>`;
+  const label = escapeHtml(category.name || "分类");
+  return `<span class="category-dot" style="background:${category.color}" title="${label}" aria-hidden="true">${categoryIconMarkup(category)}</span>`;
+}
+
+function categoryIconKey(category) {
+  if (!category) return "";
+  if (categoryIconSvgs[category.icon]) return category.icon;
+  const legacyIcon = defaultCategories.find((item) => item.id === category.id)?.icon;
+  return !category.icon || category.icon === legacyIcon ? defaultCategoryIconKeys[category.id] || "" : "";
+}
+
+function categorySvg(key) {
+  const paths = categoryIconSvgs[key];
+  if (!paths) return "";
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+
+function categoryIconMarkup(category, fallback = "类") {
+  const key = categoryIconKey(category);
+  if (key) return categorySvg(key);
+  const text = normalizeCategoryCustomIcon(category?.icon || fallback) || fallback;
+  return `<span class="category-letter ${isCategoryEmoji(text) ? "category-emoji-letter" : ""}">${escapeHtml(text)}</span>`;
 }
 
 function exportCsv() {
@@ -2023,6 +2409,24 @@ function money(value, currency = "CNY") {
   }).format(value || 0);
 }
 
+function compactMoney(value, currency = "CNY") {
+  try {
+    return new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency,
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(value || 0);
+  } catch {
+    return money(value, currency);
+  }
+}
+
+function signedCompactMoney(value, currency = "CNY") {
+  if (!value) return compactMoney(0, currency);
+  return `${value > 0 ? "+" : "-"}${compactMoney(Math.abs(value), currency)}`;
+}
+
 function signedMoney(item) {
   const formatted = money(item.amount, transactionCurrency(item));
   if (item.type === "expense") return `-${formatted}`;
@@ -2054,6 +2458,33 @@ function toMonth(date) {
 
 function toDateInput(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocalDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfWeek(date) {
+  const start = startOfDay(date);
+  const mondayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - mondayOffset);
+  return start;
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function formatShortDate(date) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(date);
 }
 
 function toDateTimeInput(date) {
