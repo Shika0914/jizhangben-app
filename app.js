@@ -2284,6 +2284,8 @@ function getAccountBalanceByCurrency(id, currency) {
 
 function getAccountTransactionImpactByCurrency(id, currency) {
   return state.transactions.reduce((balance, item) => {
+    // Future installments remain visible in their plan, but do not affect the current balance yet.
+    if (!isPostedTransaction(item)) return balance;
     if (transactionCurrency(item) !== currency) return balance;
     if (item.type === "expense" && item.accountId === id) return balance - item.amount;
     if (item.type === "income" && item.accountId === id) return balance + item.amount;
