@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#173c36" />
     <title>记账本 - 个人记账</title>
     <link id="appFavicon" rel="icon" href="./assets/icons/app-logo.svg?v=3" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=beauty-16" />
+    <link rel="stylesheet" href="./styles.css?v=beauty-23" />
   </head>
   <body>
     <div class="app-shell">
@@ -31,7 +31,6 @@
           </div>
           <div>
             <strong>记账本</strong>
-            <span>个人记账</span>
           </div>
         </div>
         <nav class="nav-tabs">
@@ -98,19 +97,51 @@
                 <h2>快速记账</h2>
                 <button class="link-button" id="addQuickTemplate" type="button">＋ 新建模板</button>
               </div>
-              <form id="quickForm" class="compact-form">
-                <input name="amount" type="number" step="0.01" min="0" placeholder="金额" required />
-                <select name="categoryId" required></select>
-                <select name="accountId" required></select>
-                <input name="note" type="text" placeholder="备注" />
-                <button class="primary-button" type="submit">保存</button>
+              <form id="quickForm" class="quick-entry-form">
+                <label class="quick-amount-field">
+                  <span>金额</span>
+                  <input name="amount" type="number" step="0.01" min="0.01" placeholder="0.00" required />
+                </label>
+                <label class="quick-currency-field">
+                  <span>币种</span>
+                  <select name="currency" required></select>
+                </label>
+                <label class="quick-account-field">
+                  <span>账户</span>
+                  <select name="accountId" required></select>
+                </label>
+                <label>
+                  <span>分类</span>
+                  <select name="categoryId" required></select>
+                </label>
+                <label>
+                  <span>备注</span>
+                  <input name="note" type="text" placeholder="可不填" />
+                </label>
+                <button class="primary-button quick-submit" type="submit">保存这笔支出</button>
               </form>
               <form id="quickTemplateForm" class="quick-template-editor" hidden>
                 <input name="id" type="hidden" />
-                <input name="note" type="text" placeholder="模板名称" required />
-                <input name="amount" type="number" step="0.01" min="0.01" placeholder="金额" required />
-                <select name="categoryId" required></select>
-                <select name="accountId" required></select>
+                <label>
+                  <span>模板名称</span>
+                  <input name="note" type="text" placeholder="例如：工作日午餐" required />
+                </label>
+                <label>
+                  <span>金额</span>
+                  <input name="amount" type="number" step="0.01" min="0.01" placeholder="0.00" required />
+                </label>
+                <label class="quick-template-account-field">
+                  <span>账户</span>
+                  <select name="accountId" required></select>
+                </label>
+                <label>
+                  <span>币种</span>
+                  <select name="currency" required></select>
+                </label>
+                <label class="quick-template-category-field">
+                  <span>分类</span>
+                  <select name="categoryId" required></select>
+                </label>
                 <div class="template-editor-actions">
                   <button class="icon-button danger-button template-delete" id="deleteQuickTemplate" type="button" title="删除模板" aria-label="删除模板">
                     <span class="action-icon trash-icon" aria-hidden="true"></span>
@@ -143,7 +174,13 @@
         <section class="view" id="assetsView">
           <section class="asset-summary">
             <div class="asset-summary-main">
-              <span>总资产</span>
+              <div class="asset-summary-mode-row">
+                <span id="assetValueLabel">总资产</span>
+                <div class="asset-value-switch asset-value-switch-dark" role="group" aria-label="资产金额口径">
+                  <button class="asset-value-button active" type="button" data-assets-value-mode="total" aria-pressed="true">总资产</button>
+                  <button class="asset-value-button" type="button" data-assets-value-mode="net" aria-pressed="false">净资产</button>
+                </div>
+              </div>
               <div class="asset-total-list" id="totalAssets" aria-live="polite"></div>
             </div>
             <p id="assetSummary">共 0 个钱包</p>
@@ -275,7 +312,7 @@
             <div class="panel credit-detail-hero">
               <button class="secondary-button" type="button" onclick="showCreditCardList()">返回信用卡列表</button>
               <div class="credit-detail-main">
-                <span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>
+                <span class="account-icon asset-account-logo has-logo account-line-logo"><img src="assets/logos/bank-card.svg?v=3" alt="" /></span>
                 <div>
                   <h2 id="creditDetailTitle">信用卡</h2>
                   <p id="creditDetailMeta"></p>
@@ -422,12 +459,18 @@
           <section class="panel stats-net-panel">
             <div class="panel-heading stats-chart-heading">
               <div>
-                <h2>净资产趋势</h2>
-                <p>所选币种计入总资产的钱包</p>
+                <h2 id="statsAssetTrendTitle">净资产趋势</h2>
+                <p id="statsAssetTrendDescription">包含所选币种钱包的正负余额</p>
               </div>
-              <div class="stats-chart-legend">
-                <span><i class="legend-dot net"></i>期末 <strong id="statsNetAssetCurrent">¥0</strong></span>
-                <span>周期变化 <strong id="statsNetAssetChange">¥0</strong></span>
+              <div class="stats-asset-actions">
+                <div class="asset-value-switch" role="group" aria-label="趋势图资产口径">
+                  <button class="asset-value-button" type="button" data-stats-asset-mode="total" aria-pressed="false">总资产</button>
+                  <button class="asset-value-button active" type="button" data-stats-asset-mode="net" aria-pressed="true">净资产</button>
+                </div>
+                <div class="stats-chart-legend">
+                  <span><i class="legend-dot net"></i><span id="statsAssetEndLabel">期末净资产</span> <strong id="statsNetAssetCurrent">¥0</strong></span>
+                  <span>周期变化 <strong id="statsNetAssetChange">¥0</strong></span>
+                </div>
               </div>
             </div>
             <div class="net-worth-chart" id="netWorthChart"></div>
@@ -481,6 +524,13 @@
                 <option value="other">其他钱包</option>
               </select>
             </label>
+            <div class="account-icon-preview" aria-live="polite">
+              <div id="accountIconPreview" aria-hidden="true"></div>
+              <div>
+                <span>钱包图标预览</span>
+                <strong id="accountIconPreviewLabel">微信</strong>
+              </div>
+            </div>
             <div class="account-balance-editor">
               <div class="balance-editor-heading">
                 <span id="initialBalanceLabel">币种余额</span>
@@ -546,6 +596,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/vendor/supabase.js?v=1"></script>
-    <script src="./app.js?v=beauty-14"></script>
+    <script src="./app.js?v=beauty-23"></script>
   </body>
 </html>

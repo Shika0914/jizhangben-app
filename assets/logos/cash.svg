@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" shape-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="cashPaper" x1="12" y1="16" x2="52" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F2F2F0"/>
+    </linearGradient>
+    <linearGradient id="cashSeal" x1="27" y1="24" x2="38" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E3E3E0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8.5" y="18.5" width="43" height="30" rx="5.5" fill="#F0F0EE" stroke="#171917" stroke-width="2.5"/>
+  <rect x="12.5" y="14.5" width="43" height="30" rx="5.5" fill="url(#cashPaper)" stroke="#171917" stroke-width="2.8"/>
+  <rect x="19" y="21.5" width="30" height="16" rx="3.5" stroke="#6C706C" stroke-width="1.8"/>
+  <circle cx="34" cy="29.5" r="7.2" fill="url(#cashSeal)" stroke="#171917" stroke-width="1.5"/>
+  <path d="M30.5 26.8h7M34 24.5v10M30.5 31.4h7" stroke="#171917" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

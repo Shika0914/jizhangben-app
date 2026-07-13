@@ -63,10 +63,10 @@ const defaultAccounts = [
 const accountTypes = {
   wechat: { label: "微信", icon: "微", color: "#07c160", logo: "./assets/logos/wechat.svg" },
   alipay: { label: "支付宝", icon: "支", color: "#1677ff", logo: "./assets/logos/alipay.svg" },
-  bank: { label: "银行卡", icon: "银", color: "#5c668e" },
-  credit_card: { label: "信用卡", icon: "卡", color: "#5c668e" },
-  cash: { label: "现金", icon: "现", color: "#a87932" },
-  other: { label: "其他钱包", icon: "钱", color: "#6f746d" },
+  bank: { label: "银行卡", icon: "银", color: "#171917", logo: "./assets/logos/bank-card.svg?v=3" },
+  credit_card: { label: "信用卡", icon: "卡", color: "#171917", logo: "./assets/logos/bank-card.svg?v=3" },
+  cash: { label: "现金", icon: "现", color: "#171917", logo: "./assets/logos/cash.svg?v=4" },
+  other: { label: "其他钱包", icon: "钱", color: "#171917", logo: "./assets/logos/wallet.svg?v=2" },
 };
 const accountTypeAliases = {
   credit: "credit_card",
@@ -122,6 +122,8 @@ let cloudSaveTimer = null;
 let cloudLoadedForUser = "";
 let draggedAccountId = "";
 let statsReportMode = "month";
+let assetsValueMode = "total";
+let statsAssetValueMode = "net";
 
 const el = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -209,6 +211,11 @@ function bindEvents() {
   el.transactionForm.addEventListener("submit", saveTransaction);
   el.quickForm.addEventListener("submit", saveQuickTransaction);
   el.quickTemplateForm.addEventListener("submit", saveQuickTemplate);
+  el.quickForm.accountId.addEventListener("change", () => fillQuickCurrencySelect(el.quickForm));
+  el.quickTemplateForm.accountId.addEventListener("change", () => fillQuickCurrencySelect(el.quickTemplateForm));
+  document.addEventListener("change", (event) => {
+    if (event.target instanceof HTMLSelectElement) syncSelectDisplay(event.target);
+  });
   el.accountForm.addEventListener("submit", saveAccount);
   el.accountForm.type.addEventListener("change", updateCreditCardFields);
   el.transactionForm.accountId.addEventListener("change", () => {
@@ -226,6 +233,12 @@ function bindEvents() {
   el.statsCurrency.addEventListener("change", renderStats);
   document.querySelectorAll("[data-stats-mode]").forEach((button) => {
     button.addEventListener("click", () => changeStatsReportMode(button.dataset.statsMode));
+  });
+  document.querySelectorAll("[data-assets-value-mode]").forEach((button) => {
+    button.addEventListener("click", () => changeAssetsValueMode(button.dataset.assetsValueMode));
+  });
+  document.querySelectorAll("[data-stats-asset-mode]").forEach((button) => {
+    button.addEventListener("click", () => changeStatsAssetValueMode(button.dataset.statsAssetMode));
   });
   [el.statsWeekDate, el.statsMonthValue, el.statsYearValue].forEach((field) => {
     field.addEventListener("change", renderStats);
@@ -578,6 +591,7 @@ function renderAll() {
   renderCategories();
   renderStats();
   renderTemplates();
+  document.querySelectorAll("select").forEach(syncSelectDisplay);
 }
 
 function renderDashboard() {
@@ -610,11 +624,14 @@ function renderAssets() {
   const included = accounts.filter(({ account }) => account.includeInAssets);
   const excludedCount = accounts.length - included.length;
 
-  renderAssetTotals(getTotalAssetsByCurrency());
-  setText("includedAccountCount", `${included.length} 个计入总资产`);
+  renderAssetTotals(getAssetValuesByCurrency(assetsValueMode));
+  setText("assetValueLabel", assetsValueMode === "total" ? "总资产" : "净资产");
+  setText("includedAccountCount", `${included.length} 个计入资产统计`);
   setText(
     "assetSummary",
-    excludedCount ? `共 ${accounts.length} 个钱包，${excludedCount} 个未计入` : `共 ${accounts.length} 个钱包，已全部计入`
+    `${assetsValueMode === "total" ? "仅统计正余额" : "已扣除负余额"} · ${
+      excludedCount ? `共 ${accounts.length} 个钱包，${excludedCount} 个未计入` : `共 ${accounts.length} 个钱包，已全部计入`
+    }`
   );
   renderList("accountList", accounts, renderAccountItem, "还没有钱包");
 }
@@ -680,8 +697,28 @@ function renderCreditCards() {
 }
 
 function renderCategories() {
-  const rows = [...state.categories].sort((a, b) => a.type.localeCompare(b.type) || a.sortOrder - b.sortOrder);
-  renderList("categoryList", rows, renderCategoryItem, "还没有分类");
+  const rows = [...state.categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  const groups = [
+    { type: "expense", label: "支出分类", rows: rows.filter((item) => item.type === "expense") },
+    { type: "income", label: "收入分类", rows: rows.filter((item) => item.type === "income") },
+  ];
+  document.querySelector("#categoryList").innerHTML = groups.map(renderCategoryGroup).join("");
+}
+
+function renderCategoryGroup(group) {
+  const items = group.rows.length
+    ? group.rows.map(renderCategoryItem).join("")
+    : `<div class="category-group-empty">还没有${group.label}</div>`;
+  return `<section class="category-group category-group-${group.type}" aria-labelledby="category-${group.type}-title">
+    <div class="category-group-heading">
+      <div>
+        <span class="category-group-mark" aria-hidden="true"></span>
+        <h3 id="category-${group.type}-title">${group.label}</h3>
+      </div>
+      <span>${group.rows.length} 个</span>
+    </div>
+    <div class="category-group-list">${items}</div>
+  </section>`;
 }
 
 function renderStats() {
@@ -715,7 +752,7 @@ function renderStats() {
   setText("statsExpenseTotal", money(expense, currency));
 
   renderStatsTrend(transactions, currency, period);
-  renderNetWorthTrend(currency, period);
+  renderNetWorthTrend(currency, period, statsAssetValueMode);
   renderCategoryShare(categoryTotals, expense, currency);
 }
 
@@ -731,6 +768,28 @@ function changeStatsReportMode(mode) {
     field.hidden = field.dataset.statsPeriod !== mode;
   });
   renderStats();
+}
+
+function changeAssetsValueMode(mode) {
+  if (!["total", "net"].includes(mode)) return;
+  assetsValueMode = mode;
+  updateAssetModeButtons("[data-assets-value-mode]", "assetsValueMode", mode);
+  renderAssets();
+}
+
+function changeStatsAssetValueMode(mode) {
+  if (!["total", "net"].includes(mode)) return;
+  statsAssetValueMode = mode;
+  updateAssetModeButtons("[data-stats-asset-mode]", "statsAssetMode", mode);
+  renderStats();
+}
+
+function updateAssetModeButtons(selector, dataKey, mode) {
+  document.querySelectorAll(selector).forEach((button) => {
+    const active = button.dataset[dataKey] === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function getStatsReportPeriod() {
@@ -781,14 +840,15 @@ function renderTemplates() {
 
 function renderQuickTemplate(item) {
   const category = findCategory(item.categoryId);
+  const currency = resolveAccountCurrency(item.accountId, item.currency);
   return `<article class="quick-template-card">
     <button class="template-use" type="button" onclick="recordQuickTemplate('${item.id}')" title="使用此模板记一笔">
       ${categoryBadge(category)}
       <span class="template-copy">
         <strong>${escapeHtml(item.note)}</strong>
-        <small>${escapeHtml(category?.name || "其他")} · ${escapeHtml(accountName(item.accountId) || "默认钱包")}</small>
+        <small>${escapeHtml(category?.name || "其他")} · ${escapeHtml(accountName(item.accountId) || "默认钱包")} · ${currency}</small>
       </span>
-      <strong class="template-amount">${money(item.amount, currencyForAccount(item.accountId))}</strong>
+      <strong class="template-amount">${money(item.amount, currency)}</strong>
     </button>
     <button class="template-edit" type="button" onclick="editQuickTemplate('${item.id}')" title="编辑模板" aria-label="编辑模板">
       <span class="action-icon pencil-icon" aria-hidden="true"></span>
@@ -799,8 +859,9 @@ function renderQuickTemplate(item) {
 function recordQuickTemplate(id) {
   const item = state.quickTemplates.find((template) => template.id === id);
   if (!item) return;
-  addQuickExpense(item.amount, item.categoryId, item.note, item.accountId);
-  toast(`已记录“${item.note}” ${money(item.amount, currencyForAccount(item.accountId))}`);
+  const currency = resolveAccountCurrency(item.accountId, item.currency);
+  addQuickExpense(item.amount, item.categoryId, item.note, item.accountId, currency);
+  toast(`已记录“${item.note}” ${money(item.amount, currency)}`);
 }
 
 function openNewQuickTemplate() {
@@ -809,6 +870,7 @@ function openNewQuickTemplate() {
   form.id.value = "";
   fillCategorySelect(form.categoryId, "expense");
   fillAccountSelect(form.accountId);
+  fillQuickCurrencySelect(form);
   form.hidden = false;
   form.querySelector(".template-delete").hidden = true;
   form.note.focus();
@@ -825,6 +887,9 @@ function editQuickTemplate(id) {
   form.categoryId.value = item.categoryId;
   fillAccountSelect(form.accountId);
   form.accountId.value = findAccount(item.accountId) ? item.accountId : defaultAccountId();
+  fillQuickCurrencySelect(form);
+  form.currency.value = resolveAccountCurrency(form.accountId.value, item.currency);
+  syncSelectDisplay(form.currency);
   form.hidden = false;
   form.querySelector(".template-delete").hidden = false;
   form.note.focus();
@@ -839,6 +904,7 @@ function saveQuickTemplate(event) {
     amount: Number(form.amount.value),
     categoryId: form.categoryId.value,
     accountId: form.accountId.value,
+    currency: resolveAccountCurrency(form.accountId.value, form.currency.value),
   };
   const index = state.quickTemplates.findIndex((item) => item.id === template.id);
   if (index >= 0) state.quickTemplates[index] = template;
@@ -853,7 +919,7 @@ function deleteEditingQuickTemplate() {
   const id = el.quickTemplateForm.id.value;
   const item = state.quickTemplates.find((template) => template.id === id);
   if (!item) return;
-  if (!confirm(`确定删除模板“${item.note} ${money(item.amount, currencyForAccount(item.accountId))}”吗？`)) return;
+  if (!confirm(`确定删除模板“${item.note} ${money(item.amount, resolveAccountCurrency(item.accountId, item.currency))}”吗？`)) return;
   state.quickTemplates = state.quickTemplates.filter((template) => template.id !== id);
   saveState();
   closeQuickTemplateEditor();
@@ -919,16 +985,21 @@ function buildStatsBuckets(period) {
   });
 }
 
-function renderNetWorthTrend(currency, period) {
+function renderNetWorthTrend(currency, period, mode) {
+  const isTotalAssets = mode === "total";
+  const label = isTotalAssets ? "总资产" : "净资产";
   const buckets = buildStatsBuckets(period);
   const points = [
-    { label: "期初", value: getNetAssetsAt(currency, period.start) },
-    ...buckets.map((bucket) => ({ label: bucket.label, value: getNetAssetsAt(currency, bucket.end) })),
+    { label: "期初", value: getAssetValueAt(currency, period.start, mode) },
+    ...buckets.map((bucket) => ({ label: bucket.label, value: getAssetValueAt(currency, bucket.end, mode) })),
   ];
   const opening = points[0].value;
   const current = points[points.length - 1].value;
   setText("statsNetAssetCurrent", money(current, currency));
   setText("statsNetAssetChange", signedCompactMoney(current - opening, currency));
+  setText("statsAssetTrendTitle", `${label}趋势`);
+  setText("statsAssetTrendDescription", isTotalAssets ? "仅统计所选币种钱包的正余额" : "包含所选币种钱包的正负余额");
+  setText("statsAssetEndLabel", `期末${label}`);
 
   const width = period.mode === "month" ? Math.max(1080, points.length * 52) : 920;
   const height = 270;
@@ -964,7 +1035,7 @@ function renderNetWorthTrend(currency, period) {
       ${showLabel ? `<text x="${pointX}" y="${height - 14}" text-anchor="middle" class="net-axis-label">${escapeHtml(point.label)}</text>` : ""}
     </g>`;
   }).join("");
-  document.querySelector("#netWorthChart").innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="净资产趋势图">
+  document.querySelector("#netWorthChart").innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${label}趋势图">
     ${grid}
     <polygon points="${areaPoints}" class="net-area"/>
     <polyline points="${linePoints}" class="net-line"/>
@@ -972,25 +1043,33 @@ function renderNetWorthTrend(currency, period) {
   </svg>`;
 }
 
-function getNetAssetsAt(currency, cutoff) {
+function getAssetValueAt(currency, cutoff, mode = "net") {
   const effectiveCutoff = cutoff > new Date() ? new Date() : cutoff;
-  const includedAccountIds = new Set(state.accounts.filter((account) => account.includeInAssets).map((account) => account.id));
-  let total = state.accounts
-    .filter((account) => includedAccountIds.has(account.id))
-    .flatMap((account) => accountBalances(account.id))
-    .filter((balance) => balance.currency === currency)
-    .reduce((sum, balance) => sum + Number(balance.initialBalance || 0), 0);
+  const balances = new Map();
+  state.accounts
+    .filter((account) => account.includeInAssets)
+    .forEach((account) => {
+      const currencyBalance = accountBalances(account.id).find((balance) => balance.currency === currency);
+      if (currencyBalance) balances.set(account.id, Number(currencyBalance.initialBalance || 0));
+    });
   state.transactions.forEach((item) => {
     const date = new Date(item.date);
     if (Number.isNaN(date.getTime()) || date >= effectiveCutoff || transactionCurrency(item) !== currency) return;
-    if (item.type === "expense" && includedAccountIds.has(item.accountId)) total -= item.amount;
-    if (item.type === "income" && includedAccountIds.has(item.accountId)) total += item.amount;
+    if (item.type === "expense" && balances.has(item.accountId)) {
+      balances.set(item.accountId, balances.get(item.accountId) - item.amount);
+    }
+    if (item.type === "income" && balances.has(item.accountId)) {
+      balances.set(item.accountId, balances.get(item.accountId) + item.amount);
+    }
     if (item.type === "transfer") {
-      if (includedAccountIds.has(item.accountId)) total -= item.amount;
-      if (includedAccountIds.has(item.targetAccountId)) total += item.amount;
+      if (balances.has(item.accountId)) balances.set(item.accountId, balances.get(item.accountId) - item.amount);
+      if (balances.has(item.targetAccountId)) balances.set(item.targetAccountId, balances.get(item.targetAccountId) + item.amount);
     }
   });
-  return total;
+  return [...balances.values()].reduce(
+    (total, value) => total + (mode === "total" ? Math.max(value, 0) : value),
+    0
+  );
 }
 
 function renderCategoryShare(rows, total, currency) {
@@ -1120,22 +1199,25 @@ function saveInstallmentTransactions(form, currency) {
 function saveQuickTransaction(event) {
   event.preventDefault();
   const form = el.quickForm;
-  addQuickExpense(Number(form.amount.value), form.categoryId.value, form.note.value.trim(), form.accountId.value);
+  const amount = Number(form.amount.value);
+  const currency = resolveAccountCurrency(form.accountId.value, form.currency.value);
+  addQuickExpense(amount, form.categoryId.value, form.note.value.trim(), form.accountId.value, currency);
   form.reset();
   fillSelects();
-  toast("已记一笔");
+  toast(`已记录 ${money(amount, currency)}`);
 }
 
-function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId()) {
+function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId(), currency = "") {
   const timestamp = new Date().toISOString();
   const resolvedAccountId = findAccount(accountId) ? accountId : defaultAccountId();
+  const resolvedCurrency = resolveAccountCurrency(resolvedAccountId, currency);
   upsertTransaction({
     id: crypto.randomUUID(),
     type: "expense",
     amount,
     categoryId,
     accountId: resolvedAccountId,
-    currency: currencyForAccount(resolvedAccountId),
+    currency: resolvedCurrency,
     targetAccountId: "",
     date: timestamp,
     note,
@@ -1199,6 +1281,10 @@ function saveAccount(event) {
   }
   if (index >= 0) state.accounts[index] = account;
   else state.accounts.push(account);
+  state.quickTemplates = state.quickTemplates.map((template) => template.accountId === account.id
+    ? { ...template, currency: resolveAccountCurrency(account.id, template.currency) }
+    : template
+  );
   saveState();
   closeAccountModal();
   renderAll();
@@ -1397,7 +1483,9 @@ function deleteAccount(id) {
   if (!confirm(`确定删除钱包“${account.name}”吗？`)) return;
   const replacementId = state.accounts.find((item) => item.id !== id).id;
   state.quickTemplates = state.quickTemplates.map((template) =>
-    template.accountId === id ? { ...template, accountId: replacementId } : template
+    template.accountId === id
+      ? { ...template, accountId: replacementId, currency: currencyForAccount(replacementId) }
+      : template
   );
   state.accounts = state.accounts.filter((item) => item.id !== id);
   saveState();
@@ -1521,6 +1609,14 @@ function updateCreditCardFields() {
   form.dueDay.disabled = !isCreditCard;
   document.querySelector("#initialBalanceLabel").textContent = isCreditCard ? "币种欠款" : "币种余额";
   normalizeBalanceRowSigns(isCreditCard);
+  updateAccountIconPreview();
+}
+
+function updateAccountIconPreview() {
+  const type = el.accountForm.type.value || "other";
+  const meta = accountTypes[type] || accountTypes.other;
+  document.querySelector("#accountIconPreview").innerHTML = accountLogoMarkup({ type });
+  setText("accountIconPreviewLabel", meta.label);
 }
 
 function renderAccountBalanceRows(balances = [{ currency: "CNY", initialBalance: 0 }], isCreditCard = false) {
@@ -1702,6 +1798,8 @@ function fillSelects() {
   fillCategorySelect(el.quickTemplateForm.categoryId, "expense");
   fillAccountSelect(el.quickForm.accountId);
   fillAccountSelect(el.quickTemplateForm.accountId);
+  fillQuickCurrencySelect(el.quickForm);
+  fillQuickCurrencySelect(el.quickTemplateForm);
   fillCategorySelect(el.transactionForm.categoryId, selectedType === "transfer" ? "expense" : selectedType);
   fillCategoryFilter();
   fillAccountSelect(el.transactionForm.accountId);
@@ -1718,6 +1816,7 @@ function fillCategorySelect(select, type) {
     .map((item) => `<option value="${item.id}">${item.name}</option>`)
     .join("");
   select.value = categories.some((item) => item.id === selected) ? selected : categories[0]?.id || "";
+  syncSelectDisplay(select);
 }
 
 function fillCategoryFilter() {
@@ -1727,6 +1826,7 @@ function fillCategoryFilter() {
     .map((item) => `<option value="${item.id}">${item.name}</option>`)
     .join("")}`;
   select.value = selected || "all";
+  syncSelectDisplay(select);
 }
 
 function fillAccountSelect(select) {
@@ -1735,6 +1835,28 @@ function fillAccountSelect(select) {
     .map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${accountCurrencies(item).join("/")}</option>`)
     .join("");
   select.value = state.accounts.some((item) => item.id === selected) ? selected : state.accounts[0]?.id || "";
+  syncSelectDisplay(select);
+}
+
+function fillQuickCurrencySelect(form) {
+  const selected = form.currency.value;
+  const account = findAccount(form.accountId.value || defaultAccountId());
+  const currencies = accountCurrencies(account);
+  form.currency.innerHTML = currencies
+    .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} · ${currency}</option>`)
+    .join("");
+  form.currency.value = currencies.includes(selected) ? selected : currencies[0] || "CNY";
+  syncSelectDisplay(form.currency);
+}
+
+function resolveAccountCurrency(accountId, currency) {
+  const currencies = accountCurrencies(findAccount(accountId));
+  return currencies.includes(currency) ? currency : currencies[0] || "CNY";
+}
+
+function syncSelectDisplay(select) {
+  const text = select.selectedOptions?.[0]?.textContent?.trim() || "";
+  select.title = text;
 }
 
 function fillTransactionCurrencySelect() {
@@ -1746,6 +1868,7 @@ function fillTransactionCurrencySelect() {
     .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} ${currency}</option>`)
     .join("");
   form.currency.value = currencies.includes(selected) ? selected : currencies[0] || "CNY";
+  syncSelectDisplay(form.currency);
 }
 
 function fillStatsCurrencySelect() {
@@ -1755,6 +1878,7 @@ function fillStatsCurrencySelect() {
     .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} ${currency}</option>`)
     .join("");
   el.statsCurrency.value = currencies.includes(selected) ? selected : currencies.includes("CNY") ? "CNY" : currencies[0];
+  syncSelectDisplay(el.statsCurrency);
 }
 
 function fillAccountFilter() {
@@ -1764,6 +1888,7 @@ function fillAccountFilter() {
     .map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
     .join("")}`;
   select.value = selected || "all";
+  syncSelectDisplay(select);
 }
 
 function renderList(id, rows, renderer, emptyText) {
@@ -1832,7 +1957,7 @@ function renderCreditAccountCard(account) {
   ).length;
   return `<article class="credit-account-card">
     <div class="credit-account-head">
-      <span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>
+      ${accountLogoMarkup(account)}
       <div class="item-main">
         <strong>${escapeHtml(account.name)}</strong>
         <span>账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日</span>
@@ -1933,13 +2058,7 @@ function renderAccountItem({ account, balances, index, total }) {
   const primaryBalance = balances[0] || { currency: account.currency || "CNY", value: 0 };
   const outstanding = isCreditCard ? Math.max(0, -primaryBalance.value) : 0;
   const availableCredit = isCreditCard ? Math.max(0, Number(account.creditLimit || 0) - outstanding) : 0;
-  const logo = account.type === "bank" || isCreditCard
-    ? `<span class="account-icon has-logo account-line-logo"><img src="assets/logos/bank-card.jpg" alt="" /></span>`
-    : account.type === "cash"
-      ? `<span class="account-icon has-logo account-line-logo cash-logo"><img src="assets/logos/cash-white.png" alt="" /></span>`
-      : meta.logo
-      ? `<span class="account-icon has-logo payment-logo" style="--account-color:${meta.color}"><img src="${meta.logo}" alt="" /></span>`
-      : `<span class="account-icon" style="background:${meta.color}">${meta.icon}</span>`;
+  const logo = accountLogoMarkup(account);
   const detail = isCreditCard
     ? `${meta.label} · ${accountCurrencies(account).join("/")} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`
     : `${meta.label} · ${accountCurrencies(account).join("/")} · ${account.includeInAssets ? "计入总资产" : "未计入总资产"}`;
@@ -1963,6 +2082,15 @@ function renderAccountItem({ account, balances, index, total }) {
 
 function getAccountVisual(account) {
   return accountTypes[account.type] || accountTypes.other;
+}
+
+function accountLogoMarkup(account) {
+  const meta = getAccountVisual(account);
+  const paymentClass = account.type === "wechat" || account.type === "alipay" ? "payment-logo" : "account-line-logo";
+  if (meta.logo) {
+    return `<span class="account-icon asset-account-logo has-logo ${paymentClass}" style="--account-color:${meta.color}"><img src="${meta.logo}" alt="" /></span>`;
+  }
+  return `<span class="account-icon asset-account-logo" style="--account-color:${meta.color}">${meta.icon}</span>`;
 }
 
 function shouldMigrateToCreditCard(account) {
@@ -2182,11 +2310,16 @@ function getAccountBalances(id) {
 }
 
 function getTotalAssetsByCurrency() {
+  return getAssetValuesByCurrency("net");
+}
+
+function getAssetValuesByCurrency(mode = "net") {
   return state.accounts
     .filter((account) => account.includeInAssets)
     .reduce((totals, account) => {
       getAccountBalances(account.id).forEach(({ currency, value }) => {
-        totals.set(currency, (totals.get(currency) || 0) + value);
+        const contribution = mode === "total" ? Math.max(value, 0) : value;
+        totals.set(currency, (totals.get(currency) || 0) + contribution);
       });
       return totals;
     }, new Map());
@@ -2376,12 +2509,20 @@ function migrateState(savedState) {
       : savedState.accounts.find((account) => account.id === transaction.accountId)?.currency || "CNY",
   }));
   const fallbackAccountId = savedState.accounts.find((account) => account.id === "alipay")?.id || savedState.accounts[0].id;
-  savedState.quickTemplates = savedState.quickTemplates.map((template) => ({
-    ...template,
-    accountId: savedState.accounts.some((account) => account.id === template.accountId)
+  savedState.quickTemplates = savedState.quickTemplates.map((template) => {
+    const accountId = savedState.accounts.some((account) => account.id === template.accountId)
       ? template.accountId
-      : fallbackAccountId,
-  }));
+      : fallbackAccountId;
+    const account = savedState.accounts.find((item) => item.id === accountId);
+    const currencies = (account?.balances || [{ currency: account?.currency || "CNY" }])
+      .map((balance) => balance.currency)
+      .filter((currency) => supportedCurrencies.includes(currency));
+    return {
+      ...template,
+      accountId,
+      currency: currencies.includes(template.currency) ? template.currency : currencies[0] || "CNY",
+    };
+  });
   return savedState;
 }
 
