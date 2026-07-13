@@ -1053,8 +1053,7 @@ function getAssetValueAt(currency, cutoff, mode = "net") {
       if (currencyBalance) balances.set(account.id, Number(currencyBalance.initialBalance || 0));
     });
   state.transactions.forEach((item) => {
-    const date = new Date(item.date);
-    if (Number.isNaN(date.getTime()) || date >= effectiveCutoff || transactionCurrency(item) !== currency) return;
+    if (!isBalanceRecognizedBefore(item, effectiveCutoff) || transactionCurrency(item) !== currency) return;
     if (item.type === "expense" && balances.has(item.accountId)) {
       balances.set(item.accountId, balances.get(item.accountId) - item.amount);
     }
@@ -1132,6 +1131,13 @@ function saveTransaction(event) {
     tags: splitTags(form.tags.value),
     createdAt: existingTransaction?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...(existingTransaction?.installmentGroupId ? {
+      installmentGroupId: existingTransaction.installmentGroupId,
+      installmentIndex: existingTransaction.installmentIndex,
+      installmentCount: existingTransaction.installmentCount,
+      installmentTotal: existingTransaction.installmentTotal,
+      installmentPurchaseDate: existingTransaction.installmentPurchaseDate || existingTransaction.createdAt || existingTransaction.date,
+    } : {}),
   };
   upsertTransaction(transaction);
   resetTransactionForm();
@@ -1164,6 +1170,8 @@ function saveInstallmentTransactions(form, currency) {
   }
   const groupId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const purchaseDate = new Date(form.date.value);
+  const installmentPurchaseDate = Number.isNaN(purchaseDate.getTime()) ? now : purchaseDate.toISOString();
   const note = form.note.value.trim() || "信用卡分期";
   const tags = splitTags(form.tags.value);
   const transactions = Array.from({ length: count }, (_, index) => {
@@ -1183,6 +1191,7 @@ function saveInstallmentTransactions(form, currency) {
       installmentIndex: index + 1,
       installmentCount: count,
       installmentTotal: totalAmount,
+      installmentPurchaseDate,
       createdAt: now,
       updatedAt: now,
     };
@@ -2181,6 +2190,14 @@ function isPostedTransaction(item) {
   return new Date(item.date) <= new Date();
 }
 
+function isBalanceRecognizedBefore(item, cutoff = new Date()) {
+  const recognitionValue = item.installmentGroupId
+    ? item.installmentPurchaseDate || item.createdAt || item.date
+    : item.date;
+  const recognitionDate = new Date(recognitionValue);
+  return !Number.isNaN(recognitionDate.getTime()) && recognitionDate < cutoff;
+}
+
 function transactionsForCreditBillPeriod(account, month) {
   const period = getCreditBillPeriod(account, month);
   return state.transactions
@@ -2284,8 +2301,7 @@ function getAccountBalanceByCurrency(id, currency) {
 
 function getAccountTransactionImpactByCurrency(id, currency) {
   return state.transactions.reduce((balance, item) => {
-    // Future installments remain visible in their plan, but do not affect the current balance yet.
-    if (!isPostedTransaction(item)) return balance;
+    if (!isBalanceRecognizedBefore(item)) return balance;
     if (transactionCurrency(item) !== currency) return balance;
     if (item.type === "expense" && item.accountId === id) return balance - item.amount;
     if (item.type === "income" && item.accountId === id) return balance + item.amount;
