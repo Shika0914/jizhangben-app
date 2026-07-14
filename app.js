@@ -264,6 +264,7 @@ function bindEvents() {
   document.querySelector("#clearBillSelection").addEventListener("click", clearBillSelection);
   document.querySelector("#deleteSelectedBills").addEventListener("click", deleteSelectedBills);
   document.querySelector("#resetTransaction").addEventListener("click", resetTransactionForm);
+  document.querySelector("#cancelTransactionEdit").addEventListener("click", resetTransactionForm);
   document.querySelector("#openAccountModal").addEventListener("click", openNewAccountModal);
   document.querySelector("#closeAccountModal").addEventListener("click", closeAccountModal);
   document.querySelector("#cancelAccountModal").addEventListener("click", closeAccountModal);
@@ -278,6 +279,7 @@ function bindEvents() {
     if (event.key === "Escape" && !el.authModal.hidden) closeAuthModal();
   });
   document.querySelector("#resetCategory").addEventListener("click", resetCategoryForm);
+  document.querySelector("#cancelCategoryEdit").addEventListener("click", resetCategoryForm);
   document.querySelector("#exportCsv").addEventListener("click", exportCsv);
   window.addEventListener("focus", () => {
     if (!currentUser || cloudSaveTimer) return;
@@ -872,7 +874,7 @@ function openNewQuickTemplate() {
   fillAccountSelect(form.accountId);
   fillQuickCurrencySelect(form);
   form.hidden = false;
-  form.querySelector(".template-delete").hidden = true;
+  setQuickTemplateFormMode(false);
   form.note.focus();
 }
 
@@ -891,8 +893,14 @@ function editQuickTemplate(id) {
   form.currency.value = resolveAccountCurrency(form.accountId.value, item.currency);
   syncSelectDisplay(form.currency);
   form.hidden = false;
-  form.querySelector(".template-delete").hidden = false;
+  setQuickTemplateFormMode(true);
   form.note.focus();
+}
+
+function setQuickTemplateFormMode(isEditing) {
+  el.quickTemplateForm.querySelector(".template-delete").hidden = !isEditing;
+  document.querySelector("#cancelQuickTemplate").textContent = isEditing ? "取消修改" : "取消";
+  document.querySelector("#quickTemplateSubmit").textContent = isEditing ? "确认修改" : "保存模板";
 }
 
 function saveQuickTemplate(event) {
@@ -930,6 +938,8 @@ function deleteEditingQuickTemplate() {
 function closeQuickTemplateEditor() {
   el.quickTemplateForm.hidden = true;
   el.quickTemplateForm.reset();
+  el.quickTemplateForm.id.value = "";
+  setQuickTemplateFormMode(false);
 }
 
 function renderStatsTrend(transactions, currency, period) {
@@ -1142,7 +1152,7 @@ function saveTransaction(event) {
   upsertTransaction(transaction);
   resetTransactionForm();
   form.amount.focus();
-  toast("账单已保存");
+  toast(existingTransaction ? "账单已修改" : "账单已保存");
 }
 
 function saveInstallmentTransactions(form, currency) {
@@ -1303,11 +1313,12 @@ function saveAccount(event) {
 function saveCategory(event) {
   event.preventDefault();
   const form = el.categoryForm;
+  const isEditing = Boolean(form.id.value);
   const category = {
     id: form.id.value || slugify(form.name.value),
     name: form.name.value.trim(),
     type: form.type.value,
-    icon: normalizeCategoryCustomIcon(form.icon.value),
+    icon: categoryIconSvgs[form.icon.value] ? form.icon.value : normalizeCategoryCustomIcon(form.icon.value),
     color: form.color.value,
     sortOrder: form.id.value ? findCategory(form.id.value).sortOrder : state.categories.length + 1,
     enabled: form.enabled.checked,
@@ -1318,7 +1329,7 @@ function saveCategory(event) {
   saveState();
   resetCategoryForm();
   renderAll();
-  toast("分类已保存");
+  toast(isEditing ? "分类已修改" : "分类已保存");
 }
 
 function upsertTransaction(transaction) {
@@ -1331,6 +1342,7 @@ function upsertTransaction(transaction) {
 
 function editTransaction(id) {
   const item = findTransaction(id);
+  if (!item) return;
   selectedType = item.type;
   setType(item.type);
   const form = el.transactionForm;
@@ -1345,6 +1357,7 @@ function editTransaction(id) {
   form.tags.value = item.tags.join(", ");
   form.note.value = item.note;
   updateInstallmentFields();
+  setTransactionFormMode(true);
   switchView("add");
 }
 
@@ -1420,6 +1433,7 @@ function updateBulkToolbar(rows = getVisibleBillRows()) {
 
 function editCategory(id) {
   const item = findCategory(id);
+  if (!item) return;
   const form = el.categoryForm;
   form.id.value = item.id;
   form.name.value = item.name;
@@ -1430,6 +1444,7 @@ function editCategory(id) {
   form.color.value = item.color;
   form.enabled.checked = item.enabled;
   document.querySelector("#categoryFormTitle").textContent = "编辑分类";
+  setCategoryFormMode(true);
   syncCategoryIconPicker();
   updateCategoryPreview();
 }
@@ -1474,6 +1489,7 @@ function editAccount(id) {
   );
   form.includeInAssets.checked = account.includeInAssets;
   document.querySelector("#accountFormTitle").textContent = "编辑钱包";
+  setAccountFormMode(true);
   showAccountModal();
 }
 
@@ -1565,6 +1581,7 @@ function dropAccount(event, targetId) {
 
 function resetTransactionForm() {
   el.transactionForm.reset();
+  el.transactionForm.id.value = "";
   el.transactionForm.date.value = toDateTimeInput(new Date());
   el.transactionForm.installmentStartDate.value = toDateInput(new Date());
   el.transactionForm.installmentCount.value = "3";
@@ -1572,6 +1589,12 @@ function resetTransactionForm() {
   fillTransactionCurrencySelect();
   selectedType = "expense";
   setType("expense");
+  setTransactionFormMode(false);
+}
+
+function setTransactionFormMode(isEditing) {
+  document.querySelector("#cancelTransactionEdit").hidden = !isEditing;
+  document.querySelector("#transactionSubmit").textContent = isEditing ? "确认修改" : "保存账单";
 }
 
 function canUseInstallment() {
@@ -1605,8 +1628,14 @@ function resetAccountForm() {
   el.accountForm.dueDay.value = "20";
   el.accountForm.includeInAssets.checked = true;
   document.querySelector("#accountFormTitle").textContent = "新增钱包";
+  setAccountFormMode(false);
   renderAccountBalanceRows([{ currency: "CNY", initialBalance: 0 }], false);
   updateCreditCardFields();
+}
+
+function setAccountFormMode(isEditing) {
+  document.querySelector("#cancelAccountModal").textContent = isEditing ? "取消修改" : "取消";
+  document.querySelector("#accountSubmit").textContent = isEditing ? "确认修改" : "保存钱包";
 }
 
 function updateCreditCardFields() {
@@ -1716,8 +1745,14 @@ function resetCategoryForm() {
   el.categoryForm.color.value = "#0f766e";
   el.categoryForm.enabled.checked = true;
   document.querySelector("#categoryFormTitle").textContent = "新增分类";
+  setCategoryFormMode(false);
   syncCategoryIconPicker();
   updateCategoryPreview();
+}
+
+function setCategoryFormMode(isEditing) {
+  document.querySelector("#cancelCategoryEdit").hidden = !isEditing;
+  document.querySelector("#categorySubmit").textContent = isEditing ? "确认修改" : "保存分类";
 }
 
 function updateCategoryPreview() {
@@ -1778,6 +1813,13 @@ function normalizeCategoryCustomIcon(value) {
   return isCategoryEmoji(first) ? first : graphemes.slice(0, 2).join("");
 }
 
+function normalizeStoredCategoryIcon(value) {
+  const icon = String(value || "").trim();
+  if (!icon || categoryIconSvgs[icon]) return icon;
+  const restoredKey = Object.keys(categoryIconSvgs).find((key) => key.slice(0, 2) === icon);
+  return restoredKey || icon;
+}
+
 function isCategoryEmoji(value) {
   return /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(String(value || ""));
 }
@@ -1787,6 +1829,7 @@ function changeTransactionType(type) {
   const editingTransaction = form.id.value ? findTransaction(form.id.value) : null;
   if (editingTransaction && editingTransaction.type !== type) {
     form.id.value = "";
+    setTransactionFormMode(false);
     toast("已切换为新账单，原账单会保留");
   }
   setType(type);
@@ -2479,6 +2522,7 @@ function migrateState(savedState) {
   }
   savedState.categories = savedState.categories.map((category) => ({
     ...category,
+    icon: normalizeStoredCategoryIcon(category.icon),
     color: defaultColorById[category.id] || category.color,
   }));
   if (!Array.isArray(savedState.accounts) || !savedState.accounts.length) savedState.accounts = defaultAccounts;

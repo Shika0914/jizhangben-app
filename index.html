@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#173c36" />
     <title>记账本 - 个人记账</title>
     <link id="appFavicon" rel="icon" href="./assets/icons/app-logo.svg?v=3" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=beauty-23" />
+    <link rel="stylesheet" href="./styles.css?v=beauty-24" />
   </head>
   <body>
     <div class="app-shell">
@@ -147,7 +147,7 @@
                     <span class="action-icon trash-icon" aria-hidden="true"></span>
                   </button>
                   <button class="secondary-button" id="cancelQuickTemplate" type="button">取消</button>
-                  <button class="primary-button" type="submit">保存模板</button>
+                  <button class="primary-button" id="quickTemplateSubmit" type="submit">保存模板</button>
                 </div>
               </form>
               <div class="template-row" id="templateRow"></div>
@@ -260,7 +260,8 @@
             </div>
             <div class="form-actions">
               <button class="secondary-button" id="resetTransaction" type="button">清空</button>
-              <button class="primary-button" type="submit">保存账单</button>
+              <button class="secondary-button" id="cancelTransactionEdit" type="button" hidden>取消修改</button>
+              <button class="primary-button" id="transactionSubmit" type="submit">保存账单</button>
             </div>
           </form>
         </section>
@@ -399,7 +400,8 @@
               </div>
               <div class="form-actions category-form-actions">
                 <button class="secondary-button" id="resetCategory" type="button">清空</button>
-                <button class="primary-button" type="submit">保存分类</button>
+                <button class="secondary-button" id="cancelCategoryEdit" type="button" hidden>取消修改</button>
+                <button class="primary-button" id="categorySubmit" type="submit">保存分类</button>
               </div>
             </form>
             <div class="panel">
@@ -559,7 +561,7 @@
           </div>
           <div class="modal-actions">
             <button class="secondary-button" id="cancelAccountModal" type="button">取消</button>
-            <button class="primary-button" type="submit">保存钱包</button>
+            <button class="primary-button" id="accountSubmit" type="submit">保存钱包</button>
           </div>
         </form>
       </section>
@@ -596,6 +598,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/vendor/supabase.js?v=1"></script>
-    <script src="./app.js?v=beauty-25"></script>
+    <script src="./app.js?v=beauty-27"></script>
   </body>
 </html>
