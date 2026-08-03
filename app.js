@@ -1,11 +1,13 @@
-const STORAGE_KEY = "jizhangben-state-v2";
+const DEMO_MODE = new URLSearchParams(window.location.search).get("demo") === "1";
+const STORAGE_KEY = DEMO_MODE ? "jizhangben-demo-state-v1" : "jizhangben-state-v2";
 const CLOUD_DIRTY_KEY = "jizhangben-cloud-dirty-v1";
+const CLOUD_BASE_KEY = "jizhangben-cloud-base-v1";
 const LOGO_STYLE_KEY = "jizhangben-logo-style-v1";
 const LEGACY_STORAGE_KEYS = ["qingzhang-state-v1", "jizhangben-state-v1"];
 const SUPABASE_URL = "https://wulhenvzdeduozvcshwt.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_qZXvz91fUAR7C3gO-RCcrw_ehAiHYMw";
 const SITE_URL = "https://shika0914.github.io/jizhangben-app/";
-const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
+const supabaseClient = DEMO_MODE ? null : window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) || null;
 const today = new Date();
 const currentMonth = toMonth(today);
 const logoStyles = {
@@ -120,10 +122,16 @@ let authMode = "login";
 let cloudHydrating = false;
 let cloudSaveTimer = null;
 let cloudLoadedForUser = "";
+let cloudBaseState = null;
+let cloudRevision = 0;
+let cloudSaveInProgress = false;
+let cloudSaveRequested = false;
+let localChangeVersion = 0;
 let draggedAccountId = "";
 let statsReportMode = "month";
-let assetsValueMode = "total";
+let assetsValueMode = "net";
 let statsAssetValueMode = "net";
+let summaryCurrency = "CNY";
 
 const el = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -131,6 +139,8 @@ const el = {
   viewTitle: document.querySelector("#viewTitle"),
   todayText: document.querySelector("#todayText"),
   monthPicker: document.querySelector("#monthPicker"),
+  dashboardSummaryCurrency: document.querySelector("#dashboardSummaryCurrency"),
+  billSummaryCurrency: document.querySelector("#billSummaryCurrency"),
   transactionForm: document.querySelector("#transactionForm"),
   quickForm: document.querySelector("#quickForm"),
   quickTemplateForm: document.querySelector("#quickTemplateForm"),
@@ -165,10 +175,11 @@ init();
 initCloud();
 
 function init() {
+  if (DEMO_MODE) document.title = "记账本 - 模拟数据";
   applyLogoStyle(loadLogoStyle());
   el.todayText.textContent = new Intl.DateTimeFormat("zh-CN", { dateStyle: "full" }).format(today);
-  el.monthPicker.value = state.selectedMonth || currentMonth;
-  state.selectedMonth = el.monthPicker.value;
+  state.selectedMonth = currentMonth;
+  el.monthPicker.value = currentMonth;
   selectedCreditMonth = state.selectedMonth;
   el.statsWeekDate.value = toDateInput(today);
   el.statsMonthValue.value = state.selectedMonth;
@@ -221,15 +232,26 @@ function bindEvents() {
   el.transactionForm.accountId.addEventListener("change", () => {
     fillTransactionCurrencySelect();
     updateInstallmentFields();
+    updateCreditBillPeriodField();
   });
+  el.transactionForm.targetAccountId.addEventListener("change", updateCreditBillPeriodField);
   el.transactionForm.useInstallment.addEventListener("change", () => {
     if (el.transactionForm.useInstallment.checked) syncInstallmentStartDate();
     updateInstallmentFields();
   });
   el.transactionForm.date.addEventListener("change", () => {
     if (!el.transactionForm.useInstallment.checked) syncInstallmentStartDate();
+    updateCreditBillPeriodField();
   });
   document.querySelector("#addAccountBalance").addEventListener("click", () => addAccountBalanceRow());
+  [el.dashboardSummaryCurrency, el.billSummaryCurrency].forEach((select) => {
+    select.addEventListener("change", () => {
+      summaryCurrency = select.value || "CNY";
+      fillSummaryCurrencySelects();
+      renderDashboard();
+      renderBills();
+    });
+  });
   el.statsCurrency.addEventListener("change", renderStats);
   document.querySelectorAll("[data-stats-mode]").forEach((button) => {
     button.addEventListener("click", () => changeStatsReportMode(button.dataset.statsMode));
@@ -336,6 +358,12 @@ function closeLogoPicker() {
 }
 
 async function initCloud() {
+  if (DEMO_MODE) {
+    document.querySelector("#openAuthModal").hidden = true;
+    document.querySelector("#cloudUser").hidden = true;
+    setSyncStatus("模拟数据 · 不进行云同步");
+    return;
+  }
   if (!supabaseClient) {
     setSyncStatus("云服务加载失败", "error");
     return;
@@ -364,6 +392,11 @@ async function handleAuthEvent(event, session) {
   if (session?.user) {
     const userChanged = currentUser?.id !== session.user.id;
     currentUser = session.user;
+    if (userChanged) {
+      cloudBaseState = null;
+      cloudRevision = 0;
+      restoreCloudBase(currentUser.id);
+    }
     updateAuthUI();
     if (userChanged || cloudLoadedForUser !== currentUser.id) {
       if (hasPendingCloudChanges()) await saveCloudState();
@@ -374,6 +407,8 @@ async function handleAuthEvent(event, session) {
 
   currentUser = null;
   cloudLoadedForUser = "";
+  cloudBaseState = null;
+  cloudRevision = 0;
   updateAuthUI();
   if (event === "SIGNED_OUT") resetToLocalDefault();
 }
@@ -472,7 +507,7 @@ async function loadCloudState({ silent = false } = {}) {
   const userId = currentUser.id;
   const { data, error } = await supabaseClient
     .from("ledger_states")
-    .select("data, updated_at")
+    .select("data, updated_at, revision")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -491,11 +526,13 @@ async function loadCloudState({ silent = false } = {}) {
 
   cloudHydrating = true;
   const cloudStateBeforeMigration = JSON.stringify(data.data);
-  state = migrateState(data.data);
-  const migratedCloudState = JSON.stringify(state);
-  state.selectedMonth = state.selectedMonth || currentMonth;
-  el.monthPicker.value = state.selectedMonth;
+  const migratedCloudLedger = migrateState(cloneLedger(data.data));
+  const migratedCloudState = JSON.stringify(migratedCloudLedger);
+  state = cloneLedger(migratedCloudLedger);
+  state.selectedMonth = currentMonth;
+  el.monthPicker.value = currentMonth;
   saveLocalState();
+  rememberCloudBase(userId, migratedCloudLedger, Number(data.revision || 0));
   cloudHydrating = false;
   cloudLoadedForUser = userId;
   renderAll();
@@ -516,26 +553,144 @@ function queueCloudSave() {
 
 async function saveCloudState() {
   if (!supabaseClient || !currentUser) return;
+  if (cloudSaveInProgress) {
+    cloudSaveRequested = true;
+    return;
+  }
+  cloudSaveInProgress = true;
   const userId = currentUser.id;
   markCloudDirty();
   setSyncStatus("正在同步…", "syncing");
+  try {
+    const synced = await mergeAndSaveCloudState(userId);
+    if (synced && currentUser?.id === userId) {
+      clearCloudDirty();
+      cloudLoadedForUser = userId;
+      setSyncStatus("已同步", "synced");
+    }
+  } finally {
+    cloudSaveInProgress = false;
+    if (cloudSaveRequested && currentUser?.id === userId) {
+      cloudSaveRequested = false;
+      saveCloudState();
+    }
+  }
+}
+
+async function mergeAndSaveCloudState(userId, retryCount = 0) {
+  const snapshotVersion = localChangeVersion;
+  const localSnapshot = migrateState(cloneLedger(state));
+  const { data: cloudRow, error: readError } = await supabaseClient
+    .from("ledger_states")
+    .select("data, updated_at, revision")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (readError) {
+    setSyncStatus("同步失败，已保存在本机", "error");
+    return false;
+  }
+  if (currentUser?.id !== userId) return false;
+
+  const hasCloudLedger = cloudRow?.data
+    && Array.isArray(cloudRow.data.accounts)
+    && Array.isArray(cloudRow.data.transactions);
+  if (!hasCloudLedger) return createCloudLedger(userId, localSnapshot, snapshotVersion);
+
+  const remoteSnapshot = migrateState(cloneLedger(cloudRow.data));
+  const storedBase = cloudBaseState || restoreCloudBase(userId)?.state;
+  const baseSnapshot = storedBase ? migrateState(cloneLedger(storedBase)) : remoteSnapshot;
+  const { mergedState, conflicts } = mergeLedgerStates(baseSnapshot, localSnapshot, remoteSnapshot);
+  const remoteRevision = Number(cloudRow.revision || 0);
+
+  if (conflicts.length) {
+    setSyncStatus("发现同步冲突", "error");
+    const confirmed = window.confirm(
+      `发现 ${conflicts.length} 项内容在本机和另一台设备都被修改。\n\n` +
+      "系统会保留最后修改的版本，并在覆盖前备份当前云端账本。是否继续同步？"
+    );
+    if (!confirmed) {
+      toast("已取消覆盖，本机修改仍然保留");
+      return false;
+    }
+    const backedUp = await backupCloudLedger(userId, cloudRow.data, remoteRevision, conflicts.length);
+    if (!backedUp) {
+      setSyncStatus("备份失败，未覆盖云端", "error");
+      toast("旧版本备份失败，已停止覆盖");
+      return false;
+    }
+  }
+
+  const nextRevision = remoteRevision + 1;
+  const { data: updatedRow, error: updateError } = await supabaseClient
+    .from("ledger_states")
+    .update({
+      data: mergedState,
+      revision: nextRevision,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .eq("revision", remoteRevision)
+    .select("revision")
+    .maybeSingle();
+
+  if (updateError) {
+    setSyncStatus("同步失败，已保存在本机", "error");
+    return false;
+  }
+  if (!updatedRow) {
+    if (retryCount < 1) return mergeAndSaveCloudState(userId, retryCount + 1);
+    setSyncStatus("云端刚刚发生变化，请再次同步", "error");
+    toast("另一台设备刚刚更新了账本，请再次同步");
+    return false;
+  }
+
+  rememberCloudBase(userId, mergedState, nextRevision);
+  if (conflicts.length) toast(`已合并并备份旧版本，共处理 ${conflicts.length} 项冲突`);
+  if (localChangeVersion !== snapshotVersion) {
+    const pendingLocalState = migrateState(cloneLedger(state));
+    const pendingMerge = mergeLedgerStates(localSnapshot, pendingLocalState, mergedState);
+    applyMergedState(pendingMerge.mergedState);
+    cloudSaveRequested = true;
+    return false;
+  }
+  applyMergedState(mergedState);
+  return true;
+}
+
+async function createCloudLedger(userId, localSnapshot, snapshotVersion) {
+  const initialRevision = 1;
   const { error } = await supabaseClient.from("ledger_states").upsert(
     {
       user_id: userId,
-      data: state,
+      data: localSnapshot,
+      revision: initialRevision,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
   );
   if (error) {
     setSyncStatus("同步失败，已保存在本机", "error");
-    return;
+    return false;
   }
-  if (currentUser?.id === userId) {
-    clearCloudDirty();
-    cloudLoadedForUser = userId;
-    setSyncStatus("已同步", "synced");
+  rememberCloudBase(userId, localSnapshot, initialRevision);
+  if (localChangeVersion !== snapshotVersion) {
+    cloudSaveRequested = true;
+    return false;
   }
+  return true;
+}
+
+async function backupCloudLedger(userId, cloudData, revision, conflictCount) {
+  saveLocalConflictBackup(userId, cloudData, revision);
+  const { error } = await supabaseClient.from("ledger_backups").insert({
+    user_id: userId,
+    data: cloudData,
+    revision,
+    reason: "sync_conflict",
+    conflict_count: conflictCount,
+  });
+  return !error;
 }
 
 function markCloudDirty() {
@@ -548,6 +703,179 @@ function clearCloudDirty() {
 
 function hasPendingCloudChanges() {
   return Boolean(currentUser && localStorage.getItem(CLOUD_DIRTY_KEY) === currentUser.id);
+}
+
+function mergeLedgerStates(baseState, localState, remoteState) {
+  const mergedState = {
+    ...remoteState,
+    selectedMonth: localState.selectedMonth || remoteState.selectedMonth || currentMonth,
+    syncTombstones: {},
+  };
+  const conflicts = [];
+  ["transactions", "accounts", "categories", "quickTemplates"].forEach((collection) => {
+    const merged = mergeLedgerCollection(collection, baseState, localState, remoteState);
+    mergedState[collection] = merged.items;
+    mergedState.syncTombstones[collection] = merged.tombstones;
+    conflicts.push(...merged.conflicts);
+  });
+  mergedState.accounts.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  mergedState.categories.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  mergedState.quickTemplates.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  return { mergedState: migrateState(mergedState), conflicts };
+}
+
+function mergeLedgerCollection(collection, baseState, localState, remoteState) {
+  const baseEntities = ledgerEntityMap(baseState, collection);
+  const localEntities = ledgerEntityMap(localState, collection);
+  const remoteEntities = ledgerEntityMap(remoteState, collection);
+  const ids = new Set([...baseEntities.keys(), ...localEntities.keys(), ...remoteEntities.keys()]);
+  const items = [];
+  const tombstones = [];
+  const conflicts = [];
+
+  ids.forEach((id) => {
+    const base = baseEntities.get(id) || null;
+    const local = localEntities.get(id) || null;
+    const remote = remoteEntities.get(id) || null;
+    const localChanged = !syncEntitiesEqual(local, base);
+    const remoteChanged = !syncEntitiesEqual(remote, base);
+    let chosen;
+
+    if (localChanged && remoteChanged) {
+      if (!syncEntitiesEqual(local, remote)) conflicts.push({ collection, id });
+      chosen = newestSyncEntity(local, remote);
+    } else if (localChanged) {
+      chosen = local;
+    } else if (remoteChanged) {
+      chosen = remote;
+    } else {
+      chosen = local || remote || base;
+    }
+
+    if (chosen?.deleted) tombstones.push({ id, deletedAt: chosen.updatedAt });
+    else if (chosen?.record) items.push(chosen.record);
+  });
+
+  return { items, tombstones, conflicts };
+}
+
+function ledgerEntityMap(ledger, collection) {
+  const map = new Map();
+  (ledger?.[collection] || []).forEach((record) => {
+    if (!record?.id) return;
+    map.set(record.id, {
+      record,
+      deleted: false,
+      updatedAt: recordSyncTime(record),
+    });
+  });
+  (ledger?.syncTombstones?.[collection] || []).forEach((tombstone) => {
+    if (!tombstone?.id) return;
+    const deletedAt = validIsoTimestamp(tombstone.deletedAt);
+    const existing = map.get(tombstone.id);
+    if (!existing || Date.parse(deletedAt) >= Date.parse(existing.updatedAt)) {
+      map.set(tombstone.id, { record: null, deleted: true, updatedAt: deletedAt });
+    }
+  });
+  return map;
+}
+
+function syncEntitiesEqual(left, right) {
+  if (!left && !right) return true;
+  if (!left || !right || left.deleted !== right.deleted) return false;
+  return left.deleted || stableJson(left.record) === stableJson(right.record);
+}
+
+function newestSyncEntity(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(left.updatedAt) >= Date.parse(right.updatedAt) ? left : right;
+}
+
+function recordSyncTime(record) {
+  return validIsoTimestamp(record?.updatedAt || record?.createdAt || record?.date);
+}
+
+function validIsoTimestamp(value) {
+  const date = new Date(value || 0);
+  return Number.isNaN(date.getTime()) ? "1970-01-01T00:00:00.000Z" : date.toISOString();
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function applyMergedState(mergedState) {
+  cloudHydrating = true;
+  state = migrateState(cloneLedger(mergedState));
+  el.monthPicker.value = state.selectedMonth || currentMonth;
+  saveLocalState();
+  cloudHydrating = false;
+  renderAll();
+}
+
+function cloneLedger(ledger) {
+  return JSON.parse(JSON.stringify(ledger));
+}
+
+function cloudBaseStorageKey(userId) {
+  return `${CLOUD_BASE_KEY}:${userId}`;
+}
+
+function rememberCloudBase(userId, ledger, revision) {
+  cloudBaseState = cloneLedger(ledger);
+  cloudRevision = Number(revision || 0);
+  try {
+    localStorage.setItem(cloudBaseStorageKey(userId), JSON.stringify({ revision: cloudRevision, state: cloudBaseState }));
+  } catch (error) {
+    console.warn("同步基准保存失败。", error);
+  }
+}
+
+function restoreCloudBase(userId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(cloudBaseStorageKey(userId)) || "null");
+    if (!saved?.state) return null;
+    cloudBaseState = saved.state;
+    cloudRevision = Number(saved.revision || 0);
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalConflictBackup(userId, ledger, revision) {
+  try {
+    localStorage.setItem(`jizhangben-conflict-backup:${userId}`, JSON.stringify({
+      revision,
+      createdAt: new Date().toISOString(),
+      state: ledger,
+    }));
+  } catch (error) {
+    console.warn("本机冲突备份保存失败。", error);
+  }
+}
+
+function markRecordDeleted(collection, id) {
+  if (!id) return;
+  if (!state.syncTombstones) state.syncTombstones = createEmptyTombstones();
+  const deletedAt = new Date().toISOString();
+  state.syncTombstones[collection] = (state.syncTombstones[collection] || [])
+    .filter((item) => item.id !== id);
+  state.syncTombstones[collection].push({ id, deletedAt });
+}
+
+function clearRecordDeletion(collection, id) {
+  if (!state.syncTombstones?.[collection]) return;
+  state.syncTombstones[collection] = state.syncTombstones[collection].filter((item) => item.id !== id);
+}
+
+function createEmptyTombstones() {
+  return { transactions: [], accounts: [], categories: [], quickTemplates: [] };
 }
 
 function setSyncStatus(message, status = "") {
@@ -585,6 +913,7 @@ function switchView(view) {
 
 function renderAll() {
   fillSelects();
+  fillStatsYearOptions();
   updateInstallmentFields();
   renderDashboard();
   renderAssets();
@@ -596,19 +925,34 @@ function renderAll() {
   document.querySelectorAll("select").forEach(syncSelectDisplay);
 }
 
+function fillStatsYearOptions() {
+  const currentYear = today.getFullYear();
+  const selectedYear = Number(el.statsYearValue.value) || currentYear;
+  const years = new Set([currentYear, selectedYear]);
+  state.transactions.forEach((item) => {
+    const year = Number(transactionDateKey(item).slice(0, 4));
+    if (year >= 2000 && year <= 2100) years.add(year);
+  });
+  el.statsYearValue.innerHTML = [...years]
+    .sort((a, b) => b - a)
+    .map((year) => `<option value="${year}">${year} 年</option>`)
+    .join("");
+  el.statsYearValue.value = String(selectedYear);
+}
+
 function renderDashboard() {
   const transactions = monthTransactions();
-  const todayTransactions = state.transactions.filter((item) => item.date.slice(0, 10) === toDateInput(today));
+  const todayTransactions = state.transactions.filter((item) => transactionDateKey(item) === toDateInput(today));
 
-  setText("monthExpense", formatCurrencyTotals(sumByCurrency(transactions, "expense")));
-  setText("monthIncome", formatCurrencyTotals(sumByCurrency(transactions, "income")));
-  setText("monthBalance", formatCurrencyTotals(netByCurrency(transactions)));
-  setText("todayExpense", formatCurrencyTotals(sumByCurrency(todayTransactions, "expense")));
-  renderDashboardAssetTotals(getTotalAssetsByCurrency());
+  setText("monthExpense", formatSelectedCurrencyTotal(sumByCurrency(transactions, "expense")));
+  setText("monthIncome", formatSelectedCurrencyTotal(sumByCurrency(transactions, "income")));
+  setText("monthBalance", formatSelectedCurrencyTotal(netByCurrency(transactions)));
+  setText("todayExpense", formatSelectedCurrencyTotal(sumByCurrency(todayTransactions, "expense")));
+  renderDashboardAssetTotals(getNetAssetsByCurrency());
 
   const recent = state.transactions
     .filter(isPostedTransaction)
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .sort((a, b) => transactionLocalDateTime(b) - transactionLocalDateTime(a))
     .slice(0, 6);
   renderList("recentBills", recent, renderBillItem, "还没有账单");
 
@@ -651,7 +995,7 @@ function renderBills() {
       const haystack = `${item.note} ${item.tags.join(",")}`.toLowerCase();
       return !query || haystack.includes(query);
     })
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+    .sort((a, b) => transactionLocalDateTime(b) - transactionLocalDateTime(a));
   selectedBillIds = new Set([...selectedBillIds].filter((id) => rows.some((item) => item.id === id)));
   renderBillSummary(rows);
   renderList("billTable", rows, renderTableRow, "没有符合条件的账单");
@@ -682,24 +1026,24 @@ function renderCreditCards() {
   renderCreditDetailHeader(selectedAccount);
   const installmentBills = state.transactions
     .filter((item) => item.installmentGroupId && item.accountId === selectedAccount.id)
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .sort((a, b) => transactionLocalDateTime(a) - transactionLocalDateTime(b));
   const plans = groupInstallmentBills(installmentBills);
   setText("installmentSummary", `${plans.length} 个分期计划`);
   renderList("installmentPlanList", plans, renderInstallmentPlan, "还没有信用卡分期");
 
   const billPeriod = getCreditBillPeriod(selectedAccount, selectedCreditMonth);
   const currentBills = transactionsForCreditBillPeriod(selectedAccount, selectedCreditMonth)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+    .sort((a, b) => transactionLocalDateTime(b) - transactionLocalDateTime(a));
   setText("creditBillTitle", `${formatMonthLabel(selectedCreditMonth)}信用卡账单`);
   setText(
     "creditBillSummary",
-    `${formatDateRange(billPeriod.start, billPeriod.end)} · ${currentBills.length} 笔账单 · 合计 ${formatCurrencyTotals(creditBillTotalByCurrency(currentBills))}`
+    `${formatDateRange(billPeriod.start, billPeriod.end)} · ${currentBills.length} 笔账单 · 合计 ${formatCurrencyTotals(creditBillTotalByCurrency(currentBills, selectedAccount.id))}`
   );
-  renderList("creditBillList", currentBills, renderCreditBillItem, "这一期还没有信用卡账单");
+  renderList("creditBillList", currentBills, (item) => renderCreditBillItem(item, selectedAccount.id), "这一期还没有信用卡账单");
 }
 
 function renderCategories() {
-  const rows = [...state.categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  const rows = state.categories.filter((item) => !item.archived).sort((a, b) => a.sortOrder - b.sortOrder);
   const groups = [
     { type: "expense", label: "支出分类", rows: rows.filter((item) => item.type === "expense") },
     { type: "income", label: "收入分类", rows: rows.filter((item) => item.type === "income") },
@@ -827,9 +1171,11 @@ function getStatsReportPeriod() {
 }
 
 function transactionsForDateRange(start, end) {
+  const startKey = toDateInput(start);
+  const endKey = toDateInput(end);
   return state.transactions.filter((item) => {
-    const date = new Date(item.date);
-    return date >= start && date < end;
+    const dateKey = transactionDateKey(item);
+    return dateKey >= startKey && dateKey < endKey;
   });
 }
 
@@ -906,6 +1252,8 @@ function setQuickTemplateFormMode(isEditing) {
 function saveQuickTemplate(event) {
   event.preventDefault();
   const form = el.quickTemplateForm;
+  const existing = state.quickTemplates.find((item) => item.id === form.id.value);
+  const now = new Date().toISOString();
   const template = {
     id: form.id.value || crypto.randomUUID(),
     note: form.note.value.trim(),
@@ -913,10 +1261,14 @@ function saveQuickTemplate(event) {
     categoryId: form.categoryId.value,
     accountId: form.accountId.value,
     currency: resolveAccountCurrency(form.accountId.value, form.currency.value),
+    sortOrder: existing?.sortOrder ?? state.quickTemplates.length,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
   };
   const index = state.quickTemplates.findIndex((item) => item.id === template.id);
   if (index >= 0) state.quickTemplates[index] = template;
   else state.quickTemplates.push(template);
+  clearRecordDeletion("quickTemplates", template.id);
   saveState();
   closeQuickTemplateEditor();
   renderTemplates();
@@ -928,6 +1280,7 @@ function deleteEditingQuickTemplate() {
   const item = state.quickTemplates.find((template) => template.id === id);
   if (!item) return;
   if (!confirm(`确定删除模板“${item.note} ${money(item.amount, resolveAccountCurrency(item.accountId, item.currency))}”吗？`)) return;
+  markRecordDeleted("quickTemplates", id);
   state.quickTemplates = state.quickTemplates.filter((template) => template.id !== id);
   saveState();
   closeQuickTemplateEditor();
@@ -946,7 +1299,7 @@ function renderStatsTrend(transactions, currency, period) {
   const totals = buildStatsBuckets(period).map((bucket) => ({ ...bucket, income: 0, expense: 0 }));
   transactions.forEach((item) => {
     if (!["income", "expense"].includes(item.type)) return;
-    const date = new Date(item.date);
+    const date = transactionLocalDateTime(item);
     const bucket = totals.find((entry) => date >= entry.start && date < entry.end);
     if (bucket) bucket[item.type] += item.amount;
   });
@@ -1059,6 +1412,7 @@ function getAssetValueAt(currency, cutoff, mode = "net") {
   state.accounts
     .filter((account) => account.includeInAssets)
     .forEach((account) => {
+      if (!isAccountBalanceRecognizedBefore(account, effectiveCutoff)) return;
       const currencyBalance = accountBalances(account.id).find((balance) => balance.currency === currency);
       if (currencyBalance) balances.set(account.id, Number(currencyBalance.initialBalance || 0));
     });
@@ -1112,6 +1466,12 @@ function saveTransaction(event) {
   const currency = supportedCurrencies.includes(form.currency.value) ? form.currency.value : currencyForAccount(sourceAccount?.id);
   const useInstallment = canUseInstallment() && form.useInstallment.checked && !form.id.value;
   const existingTransaction = form.id.value ? findTransaction(form.id.value) : null;
+  const receivingCreditAccount = selectedType === "income" && sourceAccount?.type === "credit_card"
+    ? sourceAccount
+    : selectedType === "transfer" && targetAccount?.type === "credit_card"
+      ? targetAccount
+      : null;
+  const selectedBillMonth = /^\d{4}-\d{2}$/.test(form.creditBillMonth.value) ? form.creditBillMonth.value : "";
   if (selectedType === "transfer" && form.accountId.value === form.targetAccountId.value) {
     toast("转出和转入不能是同一个钱包");
     return;
@@ -1137,10 +1497,16 @@ function saveTransaction(event) {
     accountId: form.accountId.value || defaultAccountId(),
     targetAccountId: selectedType === "transfer" ? form.targetAccountId.value : "",
     date: new Date(form.date.value).toISOString(),
+    localDate: form.date.value.slice(0, 10),
+    localTime: form.date.value.slice(11, 16),
     note: form.note.value.trim(),
     tags: splitTags(form.tags.value),
     createdAt: existingTransaction?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...(receivingCreditAccount && selectedBillMonth ? {
+      creditBillAccountId: receivingCreditAccount.id,
+      creditBillMonth: selectedBillMonth,
+    } : {}),
     ...(existingTransaction?.installmentGroupId ? {
       installmentGroupId: existingTransaction.installmentGroupId,
       installmentIndex: existingTransaction.installmentIndex,
@@ -1173,7 +1539,7 @@ function saveInstallmentTransactions(form, currency) {
     return;
   }
   const baseAmount = Math.floor((totalAmount / count) * 100) / 100;
-  const date = new Date(form.installmentStartDate.value || form.date.value);
+  const date = parseLocalDate(form.installmentStartDate.value) || new Date(form.date.value);
   if (Number.isNaN(date.getTime())) {
     toast("请选择首期日期");
     return;
@@ -1186,6 +1552,7 @@ function saveInstallmentTransactions(form, currency) {
   const tags = splitTags(form.tags.value);
   const transactions = Array.from({ length: count }, (_, index) => {
     const amount = index === count - 1 ? Number((totalAmount - baseAmount * (count - 1)).toFixed(2)) : baseAmount;
+    const installmentDate = addMonthsToDate(date, index);
     return {
       id: crypto.randomUUID(),
       type: "expense",
@@ -1194,7 +1561,9 @@ function saveInstallmentTransactions(form, currency) {
       categoryId: form.categoryId.value,
       accountId: form.accountId.value || defaultAccountId(),
       targetAccountId: "",
-      date: addMonthsToDate(date, index).toISOString(),
+      date: installmentDate.toISOString(),
+      localDate: toDateInput(installmentDate),
+      localTime: "00:00",
       note: `${note} ${index + 1}/${count}`,
       tags,
       installmentGroupId: groupId,
@@ -1207,6 +1576,7 @@ function saveInstallmentTransactions(form, currency) {
     };
   });
 
+  transactions.forEach(ensureAccountBalanceStart);
   state.transactions = [...transactions, ...state.transactions];
   saveState();
   renderAll();
@@ -1227,7 +1597,8 @@ function saveQuickTransaction(event) {
 }
 
 function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId(), currency = "") {
-  const timestamp = new Date().toISOString();
+  const now = new Date();
+  const timestamp = now.toISOString();
   const resolvedAccountId = findAccount(accountId) ? accountId : defaultAccountId();
   const resolvedCurrency = resolveAccountCurrency(resolvedAccountId, currency);
   upsertTransaction({
@@ -1239,6 +1610,8 @@ function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId(
     currency: resolvedCurrency,
     targetAccountId: "",
     date: timestamp,
+    localDate: toDateInput(now),
+    localTime: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
     note,
     tags: [],
     createdAt: timestamp,
@@ -1265,9 +1638,16 @@ function saveAccount(event) {
   }
 
   const existingAccount = form.id.value ? findAccount(form.id.value) : null;
+  const now = new Date().toISOString();
+  const existingBalanceStart = new Date(existingAccount?.balanceStartedAt || 0);
+  const openingDebtBalances = !existingAccount && isCreditCard
+    ? enteredBalances.filter((balance) => Number(balance.initialBalance) < 0)
+    : [];
   const balances = existingAccount
     ? currentBalancesToInitialBalances(existingAccount.id, enteredBalances)
-    : enteredBalances;
+    : isCreditCard
+      ? enteredBalances.map((balance) => ({ ...balance, initialBalance: 0 }))
+      : enteredBalances;
   const account = {
     id: form.id.value || crypto.randomUUID(),
     name,
@@ -1279,6 +1659,12 @@ function saveAccount(event) {
     billingDay: isCreditCard ? Number(form.billingDay.value || 1) : 1,
     dueDay: isCreditCard ? Number(form.dueDay.value || 20) : 20,
     includeInAssets: form.includeInAssets.checked,
+    sortOrder: existingAccount?.sortOrder ?? state.accounts.length,
+    createdAt: existingAccount?.createdAt || now,
+    balanceStartedAt: existingAccount && !Number.isNaN(existingBalanceStart.getTime()) && existingBalanceStart.getTime() > 0
+      ? existingAccount.balanceStartedAt
+      : now,
+    updatedAt: now,
   };
   const index = state.accounts.findIndex((item) => item.id === account.id);
   const hasTransactions = existingAccount && state.transactions.some(
@@ -1300,28 +1686,66 @@ function saveAccount(event) {
   }
   if (index >= 0) state.accounts[index] = account;
   else state.accounts.push(account);
+  clearRecordDeletion("accounts", account.id);
+  const openingDebtTransactions = createOpeningCreditDebtTransactions(account, openingDebtBalances);
+  if (openingDebtTransactions.length) state.transactions.unshift(...openingDebtTransactions);
   state.quickTemplates = state.quickTemplates.map((template) => template.accountId === account.id
-    ? { ...template, currency: resolveAccountCurrency(account.id, template.currency) }
+    ? { ...template, currency: resolveAccountCurrency(account.id, template.currency), updatedAt: now }
     : template
   );
   saveState();
   closeAccountModal();
   renderAll();
-  toast(index >= 0 ? "钱包已更新" : "钱包已添加");
+  toast(index >= 0
+    ? "钱包已更新"
+    : openingDebtTransactions.length
+      ? `钱包已添加，并记录 ${openingDebtTransactions.length} 笔初始欠款`
+      : "钱包已添加"
+  );
+}
+
+function createOpeningCreditDebtTransactions(account, debtBalances) {
+  if (account.type !== "credit_card" || !debtBalances.length) return [];
+  const now = new Date();
+  const period = getCreditBillPeriod(account, currentMonth);
+  const billDate = now < period.start ? period.start : now > period.end ? period.end : now;
+  const timestamp = now.toISOString();
+  return debtBalances.map((balance) => ({
+    id: crypto.randomUUID(),
+    type: "expense",
+    amount: Math.abs(Number(balance.initialBalance)),
+    currency: balance.currency,
+    categoryId: "other-expense",
+    accountId: account.id,
+    targetAccountId: "",
+    date: billDate.toISOString(),
+    localDate: toDateInput(billDate),
+    localTime: `${String(billDate.getHours()).padStart(2, "0")}:${String(billDate.getMinutes()).padStart(2, "0")}`,
+    note: "初始信用卡欠款",
+    tags: [],
+    openingCreditDebt: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
 }
 
 function saveCategory(event) {
   event.preventDefault();
   const form = el.categoryForm;
   const isEditing = Boolean(form.id.value);
+  const existing = form.id.value ? findCategory(form.id.value) : null;
+  const now = new Date().toISOString();
   const category = {
-    id: form.id.value || slugify(form.name.value),
+    id: form.id.value || crypto.randomUUID(),
     name: form.name.value.trim(),
     type: form.type.value,
     icon: categoryIconSvgs[form.icon.value] ? form.icon.value : normalizeCategoryCustomIcon(form.icon.value),
     color: form.color.value,
-    sortOrder: form.id.value ? findCategory(form.id.value).sortOrder : state.categories.length + 1,
+    sortOrder: existing?.sortOrder ?? state.categories.length + 1,
     enabled: form.enabled.checked,
+    archived: false,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
   };
   const index = state.categories.findIndex((item) => item.id === category.id);
   if (index >= 0) state.categories[index] = category;
@@ -1333,9 +1757,11 @@ function saveCategory(event) {
 }
 
 function upsertTransaction(transaction) {
+  ensureAccountBalanceStart(transaction);
   const index = state.transactions.findIndex((item) => item.id === transaction.id);
   if (index >= 0) state.transactions[index] = transaction;
   else state.transactions.unshift(transaction);
+  clearRecordDeletion("transactions", transaction.id);
   saveState();
   renderAll();
 }
@@ -1348,17 +1774,31 @@ function editTransaction(id) {
   const form = el.transactionForm;
   form.id.value = item.id;
   form.amount.value = item.amount;
-  form.categoryId.value = item.categoryId;
+  const originalCategory = findCategory(item.categoryId);
+  const categoryIsCurrent = originalCategory && !originalCategory.archived && originalCategory.enabled;
+  if (item.type !== "transfer" && !categoryIsCurrent) {
+    form.categoryId.insertAdjacentHTML("afterbegin", `<option value="">请选择当前分类（原分类已不可用）</option>`);
+    form.categoryId.value = "";
+    syncSelectDisplay(form.categoryId);
+  } else {
+    form.categoryId.value = item.categoryId;
+  }
   form.accountId.value = item.accountId;
   fillTransactionCurrencySelect();
   form.currency.value = transactionCurrency(item);
   form.targetAccountId.value = item.targetAccountId || "";
-  form.date.value = toDateTimeInput(new Date(item.date));
+  form.date.value = toTransactionDateTimeInput(item);
   form.tags.value = item.tags.join(", ");
   form.note.value = item.note;
   updateInstallmentFields();
+  updateCreditBillPeriodField();
+  form.creditBillMonth.value = item.creditBillAccountId === creditReceivingAccount()?.id
+    ? item.creditBillMonth || ""
+    : "";
+  syncSelectDisplay(form.creditBillMonth);
   setTransactionFormMode(true);
   switchView("add");
+  if (item.type !== "transfer" && !categoryIsCurrent) toast("原分类已删除或停用，请选择当前分类");
 }
 
 function selectCreditAccount(id) {
@@ -1374,6 +1814,7 @@ function showCreditCardList() {
 
 function deleteTransaction(id) {
   if (!confirm("确定删除这笔账单吗？")) return;
+  markRecordDeleted("transactions", id);
   state.transactions = state.transactions.filter((item) => item.id !== id);
   selectedBillIds.delete(id);
   saveState();
@@ -1406,6 +1847,7 @@ function deleteSelectedBills() {
     return;
   }
   if (!confirm(`确定删除已选的 ${count} 笔账单吗？此操作无法撤销。`)) return;
+  selectedBillIds.forEach((id) => markRecordDeleted("transactions", id));
   state.transactions = state.transactions.filter((item) => !selectedBillIds.has(item.id));
   selectedBillIds.clear();
   saveState();
@@ -1460,16 +1902,24 @@ function deleteCategory(id) {
 
   const usedCount = state.transactions.filter((item) => item.categoryId === id).length;
   const message = usedCount
-    ? `这个分类下有 ${usedCount} 笔账单。删除后这些账单会归到“其他”，确定删除吗？`
+    ? `这个分类下有 ${usedCount} 笔历史账单。删除后历史账单仍保留原分类，但新账单不再可选，确定删除吗？`
     : `确定删除“${category.name}”分类吗？`;
   if (!confirm(message)) return;
 
-  state.transactions = state.transactions.map((item) => (item.categoryId === id ? { ...item, categoryId: fallbackId } : item));
-  state.categories = state.categories.filter((item) => item.id !== id);
+  const replacementId = currentCategoryFallbackId(category.type, id);
+  state.categories = state.categories.map((item) => item.id === id
+    ? { ...item, enabled: false, archived: true, archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    : item
+  );
+  state.quickTemplates = replacementId
+    ? state.quickTemplates.map((item) => item.categoryId === id
+      ? { ...item, categoryId: replacementId, updatedAt: new Date().toISOString() }
+      : item)
+    : state.quickTemplates.filter((item) => item.categoryId !== id);
   saveState();
   resetCategoryForm();
   renderAll();
-  toast("分类已删除");
+  toast("分类已删除，历史账单保持不变");
 }
 
 function editAccount(id) {
@@ -1507,12 +1957,14 @@ function deleteAccount(id) {
   }
   if (!confirm(`确定删除钱包“${account.name}”吗？`)) return;
   const replacementId = state.accounts.find((item) => item.id !== id).id;
+  const updatedAt = new Date().toISOString();
   state.quickTemplates = state.quickTemplates.map((template) =>
     template.accountId === id
-      ? { ...template, accountId: replacementId, currency: currencyForAccount(replacementId) }
+      ? { ...template, accountId: replacementId, currency: currencyForAccount(replacementId), updatedAt }
       : template
   );
   state.accounts = state.accounts.filter((item) => item.id !== id);
+  markRecordDeleted("accounts", id);
   saveState();
   resetAccountForm();
   renderAll();
@@ -1527,7 +1979,8 @@ function moveAccount(id, direction) {
   const accounts = [...state.accounts];
   const [account] = accounts.splice(index, 1);
   accounts.splice(nextIndex, 0, account);
-  state.accounts = accounts;
+  const updatedAt = new Date().toISOString();
+  state.accounts = accounts.map((item, sortOrder) => ({ ...item, sortOrder, updatedAt }));
   saveState();
   renderAll();
   toast("钱包顺序已更新");
@@ -1573,7 +2026,8 @@ function dropAccount(event, targetId) {
   const rect = event.currentTarget.getBoundingClientRect();
   const insertAfter = event.clientY > rect.top + rect.height / 2;
   accounts.splice(targetIndex + (insertAfter ? 1 : 0), 0, account);
-  state.accounts = accounts;
+  const updatedAt = new Date().toISOString();
+  state.accounts = accounts.map((item, sortOrder) => ({ ...item, sortOrder, updatedAt }));
   saveState();
   renderAll();
   toast("钱包顺序已更新");
@@ -1586,6 +2040,7 @@ function resetTransactionForm() {
   el.transactionForm.installmentStartDate.value = toDateInput(new Date());
   el.transactionForm.installmentCount.value = "3";
   el.transactionForm.accountId.value = defaultAccountId();
+  el.transactionForm.creditBillMonth.value = "";
   fillTransactionCurrencySelect();
   selectedType = "expense";
   setType("expense");
@@ -1620,6 +2075,44 @@ function syncInstallmentStartDate() {
     : toDateInput(new Date());
 }
 
+function creditReceivingAccount() {
+  const form = el.transactionForm;
+  if (selectedType === "income") return findAccount(form.accountId.value || defaultAccountId());
+  if (selectedType === "transfer") return findAccount(form.targetAccountId.value);
+  return null;
+}
+
+function creditBillMonthForDate(account, value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!account || Number.isNaN(date.getTime())) return currentMonth;
+  const billingDay = Math.min(28, Math.max(1, Number(account.billingDay || 1)));
+  const statementDate = new Date(date.getFullYear(), date.getMonth() + (date.getDate() > billingDay ? 1 : 0), 1);
+  return toMonth(statementDate);
+}
+
+function updateCreditBillPeriodField() {
+  const form = el.transactionForm;
+  const field = document.querySelector(".credit-bill-period-field");
+  const account = creditReceivingAccount();
+  const isVisible = account?.type === "credit_card";
+  field.hidden = !isVisible;
+  form.creditBillMonth.disabled = !isVisible;
+  if (!isVisible) {
+    form.creditBillMonth.value = "";
+    return;
+  }
+
+  const selected = form.creditBillMonth.value;
+  const automaticMonth = creditBillMonthForDate(account, form.date.value || new Date());
+  const months = Array.from({ length: 25 }, (_, index) => addMonths(automaticMonth, index - 12));
+  form.creditBillMonth.innerHTML = [
+    `<option value="">自动归入（${formatMonthLabel(automaticMonth)}账单）</option>`,
+    ...months.map((month) => `<option value="${month}">${formatMonthLabel(month)}账单</option>`),
+  ].join("");
+  form.creditBillMonth.value = months.includes(selected) ? selected : "";
+  syncSelectDisplay(form.creditBillMonth);
+}
+
 function resetAccountForm() {
   el.accountForm.reset();
   el.accountForm.id.value = "";
@@ -1646,6 +2139,7 @@ function updateCreditCardFields() {
   form.billingDay.disabled = !isCreditCard;
   form.dueDay.disabled = !isCreditCard;
   document.querySelector("#initialBalanceLabel").textContent = isCreditCard ? "币种欠款" : "币种余额";
+  document.querySelector("#creditOpeningDebtHint").hidden = !isCreditCard || Boolean(form.id.value);
   normalizeBalanceRowSigns(isCreditCard);
   updateAccountIconPreview();
 }
@@ -1843,6 +2337,7 @@ function setType(type) {
   el.transactionForm.categoryId.disabled = type === "transfer";
   fillTransactionCurrencySelect();
   updateInstallmentFields();
+  updateCreditBillPeriodField();
 }
 
 function fillSelects() {
@@ -1857,7 +2352,9 @@ function fillSelects() {
   fillAccountSelect(el.transactionForm.accountId);
   fillAccountSelect(el.transactionForm.targetAccountId);
   fillTransactionCurrencySelect();
+  updateCreditBillPeriodField();
   fillAccountFilter();
+  fillSummaryCurrencySelects();
   fillStatsCurrencySelect();
 }
 
@@ -1875,7 +2372,7 @@ function fillCategoryFilter() {
   const select = document.querySelector("#categoryFilter");
   const selected = select.value;
   select.innerHTML = `<option value="all">全部分类</option>${state.categories
-    .map((item) => `<option value="${item.id}">${item.name}</option>`)
+    .map((item) => `<option value="${item.id}">${item.name}${item.archived ? "（已删除）" : ""}</option>`)
     .join("")}`;
   select.value = selected || "all";
   syncSelectDisplay(select);
@@ -1933,6 +2430,30 @@ function fillStatsCurrencySelect() {
   syncSelectDisplay(el.statsCurrency);
 }
 
+function availableLedgerCurrencies() {
+  const available = new Set([
+    ...state.accounts.flatMap((account) => accountCurrencies(account)),
+    ...state.transactions.map((item) => transactionCurrency(item)),
+  ]);
+  const currencies = supportedCurrencies.filter((currency) => available.has(currency));
+  return currencies.length ? currencies : ["CNY"];
+}
+
+function fillSummaryCurrencySelects() {
+  const currencies = availableLedgerCurrencies();
+  if (!currencies.includes(summaryCurrency)) {
+    summaryCurrency = currencies.includes("CNY") ? "CNY" : currencies[0];
+  }
+  const options = currencies
+    .map((currency) => `<option value="${currency}">${currencyNames[currency] || currency} ${currency}</option>`)
+    .join("");
+  [el.dashboardSummaryCurrency, el.billSummaryCurrency].forEach((select) => {
+    select.innerHTML = options;
+    select.value = summaryCurrency;
+    syncSelectDisplay(select);
+  });
+}
+
 function fillAccountFilter() {
   const select = document.querySelector("#accountFilter");
   const selected = select.value;
@@ -1950,9 +2471,9 @@ function renderList(id, rows, renderer, emptyText) {
 
 function renderBillSummary(rows) {
   document.querySelector("#billSummary").innerHTML = [
-    ["支出合计", formatCurrencyTotals(sumByCurrency(rows, "expense")), "expense"],
-    ["收入合计", formatCurrencyTotals(sumByCurrency(rows, "income")), "income"],
-    ["净额", formatCurrencyTotals(netByCurrency(rows)), "balance"],
+    ["支出合计", formatSelectedCurrencyTotal(sumByCurrency(rows, "expense")), "expense"],
+    ["收入合计", formatSelectedCurrencyTotal(sumByCurrency(rows, "income")), "income"],
+    ["净额", formatSelectedCurrencyTotal(netByCurrency(rows)), "balance"],
   ]
     .map(([label, value, type]) => `<div class="bill-summary-item">
       <span>${label}</span>
@@ -1961,13 +2482,24 @@ function renderBillSummary(rows) {
     .join("");
 }
 
+function renderTagPills(tags, showEmpty = false) {
+  const values = (Array.isArray(tags) ? tags : [])
+    .map((tag) => String(tag || "").trim())
+    .filter(Boolean);
+  if (!values.length) return showEmpty ? `<span class="tag-empty">无标签</span>` : "";
+  return `<div class="tag-pill-list">${values
+    .map((tag) => `<span class="tag-pill" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`)
+    .join("")}</div>`;
+}
+
 function renderBillItem(item) {
   const category = findCategory(item.categoryId);
   return `<div class="bill-item">
     ${categoryBadge(category, item.type)}
     <div class="item-main">
-      <strong>${item.note || typeLabel(item.type)}</strong>
-      <span>${formatDate(item.date)} · ${escapeHtml(accountName(item.accountId))}</span>
+      <strong>${escapeHtml(item.note || typeLabel(item.type))}</strong>
+      <span>${formatTransactionDate(item)} · ${escapeHtml(accountName(item.accountId))}</span>
+      ${renderTagPills(item.tags)}
     </div>
     <div class="quick-bill-actions">
       <strong class="amount-${item.type}">${signedMoney(item)}</strong>
@@ -1979,17 +2511,24 @@ function renderBillItem(item) {
   </div>`;
 }
 
-function renderCreditBillItem(item) {
+function renderCreditBillItem(item, accountId) {
   const category = findCategory(item.categoryId);
   const installmentText = item.installmentGroupId ? ` · 分期 ${item.installmentIndex || "-"} / ${item.installmentCount || "-"}` : "";
+  const impact = creditBillImpact(item, accountId);
+  const amountType = impact < 0 ? "income" : "expense";
+  const accountText = item.type === "transfer"
+    ? `${accountName(item.accountId)} → ${accountName(item.targetAccountId)}`
+    : accountName(item.accountId);
+  const billAmount = `${impact < 0 ? "+" : "-"}${money(item.amount, transactionCurrency(item))}`;
   return `<div class="bill-item">
     ${categoryBadge(category, item.type)}
     <div class="item-main">
-      <strong>${item.note || typeLabel(item.type)}</strong>
-      <span>${formatDate(item.date)} · ${escapeHtml(accountName(item.accountId))}${installmentText}</span>
+      <strong>${escapeHtml(item.note || typeLabel(item.type))}</strong>
+      <span>${formatTransactionDate(item)} · ${escapeHtml(accountText)}${installmentText}</span>
+      ${renderTagPills(item.tags)}
     </div>
     <div class="quick-bill-actions">
-      <strong class="amount-${item.type}">${signedMoney(item)}</strong>
+      <strong class="amount-${amountType}">${billAmount}</strong>
       <div class="row-actions">
         <button class="icon-button" type="button" onclick="editTransaction('${item.id}')" title="编辑账单" aria-label="编辑账单"><span class="action-icon pencil-icon" aria-hidden="true"></span></button>
         <button class="icon-button danger-button" type="button" onclick="deleteTransaction('${item.id}')" title="删除账单" aria-label="删除账单"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
@@ -2040,7 +2579,7 @@ function renderCreditDetailHeader(account) {
 }
 
 function renderInstallmentPlan(plan) {
-  const paidCount = plan.items.filter((item) => new Date(item.date) <= today).length;
+  const paidCount = plan.items.filter((item) => transactionLocalDateTime(item) <= today).length;
   const firstAmount = plan.items[0]?.amount || 0;
   return `<article class="installment-plan">
     <div class="installment-plan-head">
@@ -2057,11 +2596,11 @@ function renderInstallmentPlan(plan) {
 }
 
 function renderInstallmentPeriod(item, planTotal = item.installmentTotal || 0) {
-  const due = new Date(item.date) <= today;
+  const due = transactionLocalDateTime(item) <= today;
   return `<div class="installment-period">
     <div class="item-main">
       <strong>第 ${item.installmentIndex || "-"} 期</strong>
-      <span>${formatDate(item.date)} · ${due ? "已到期" : "未到期"} · 总额 ${money(planTotal, transactionCurrency(item))}</span>
+      <span>${formatTransactionDate(item)} · ${due ? "已到期" : "未到期"} · 总额 ${money(planTotal, transactionCurrency(item))}</span>
     </div>
     <strong class="amount-expense">-${money(item.amount, transactionCurrency(item))}</strong>
     <div class="row-actions">
@@ -2077,11 +2616,11 @@ function renderTableRow(item) {
     <label class="bill-check" title="选择账单">
       <input class="bill-select" type="checkbox" value="${item.id}" ${selectedBillIds.has(item.id) ? "checked" : ""} onchange="toggleBillSelection('${item.id}', this.checked)" />
     </label>
-    <span class="item-meta">${formatDate(item.date)}</span>
+    <span class="item-meta">${formatTransactionDate(item)}</span>
     ${categoryBadge(category, item.type)}
     <div class="item-main">
-      <strong>${category?.name || typeLabel(item.type)} · ${item.note || "无备注"}</strong>
-      <span>${item.tags.join("、") || "无标签"}</span>
+      <strong>${escapeHtml(category?.name || typeLabel(item.type))} · ${escapeHtml(item.note || "无备注")}</strong>
+      ${renderTagPills(item.tags, true)}
     </div>
     <span>${escapeHtml(accountName(item.accountId))}</span>
     <strong class="amount-${item.type}">${signedMoney(item)}</strong>
@@ -2113,7 +2652,7 @@ function renderAccountItem({ account, balances, index, total }) {
   const logo = accountLogoMarkup(account);
   const detail = isCreditCard
     ? `${meta.label} · ${accountCurrencies(account).join("/")} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`
-    : `${meta.label} · ${accountCurrencies(account).join("/")} · ${account.includeInAssets ? "计入总资产" : "未计入总资产"}`;
+    : `${meta.label} · ${accountCurrencies(account).join("/")} · ${account.includeInAssets ? "计入资产统计" : "未计入资产统计"}`;
   const balanceMarkup = isCreditCard
     ? `<div class="account-balance-block">${balances.map(({ currency, value }) => `<span>待还款 ${currency}</span><strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(Math.max(0, -value), currency)}</strong>`).join("")}</div>`
     : `<div class="account-balance-list">${balances.map(({ currency, value }) => `<strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(value, currency)}</strong>`).join("")}</div>`;
@@ -2198,13 +2737,14 @@ function categoryIconMarkup(category, fallback = "类") {
 
 function exportCsv() {
   const rows = [
-    ["日期", "类型", "分类", "账户", "转入账户", "币种", "金额", "备注", "标签"],
+    ["日期", "类型", "分类", "账户", "转入账户", "信用卡账期", "币种", "金额", "备注", "标签"],
     ...state.transactions.map((item) => [
-      formatDate(item.date),
+      formatTransactionDate(item),
       typeLabel(item.type),
       findCategory(item.categoryId)?.name || "",
       accountName(item.accountId),
       accountName(item.targetAccountId),
+      item.creditBillMonth || "",
       transactionCurrency(item),
       item.amount,
       item.note,
@@ -2226,27 +2766,55 @@ function monthTransactions() {
 }
 
 function transactionsForMonth(month) {
-  return state.transactions.filter((item) => item.date.slice(0, 7) === month);
+  return state.transactions.filter((item) => transactionDateKey(item).slice(0, 7) === month);
 }
 
 function isPostedTransaction(item) {
-  return new Date(item.date) <= new Date();
+  return transactionLocalDateTime(item) <= new Date();
+}
+
+function isAccountBalanceRecognizedBefore(account, cutoff = new Date()) {
+  const startedAt = new Date(account?.balanceStartedAt || account?.createdAt || 0);
+  if (Number.isNaN(startedAt.getTime())) return true;
+  return startedAt < cutoff;
+}
+
+function transactionBalanceRecognitionDate(item) {
+  return item.installmentGroupId
+    ? new Date(item.installmentPurchaseDate || item.createdAt || item.date)
+    : transactionLocalDateTime(item);
 }
 
 function isBalanceRecognizedBefore(item, cutoff = new Date()) {
-  const recognitionValue = item.installmentGroupId
-    ? item.installmentPurchaseDate || item.createdAt || item.date
-    : item.date;
-  const recognitionDate = new Date(recognitionValue);
+  const recognitionDate = transactionBalanceRecognitionDate(item);
   return !Number.isNaN(recognitionDate.getTime()) && recognitionDate < cutoff;
+}
+
+function ensureAccountBalanceStart(transaction) {
+  const recognitionDate = transactionBalanceRecognitionDate(transaction);
+  if (Number.isNaN(recognitionDate.getTime())) return;
+  const accountIds = transaction.type === "transfer"
+    ? [transaction.accountId, transaction.targetAccountId]
+    : [transaction.accountId];
+  accountIds.filter(Boolean).forEach((accountId) => {
+    const account = findAccount(accountId);
+    if (!account) return;
+    const currentStart = new Date(account.balanceStartedAt || 0);
+    if (!Number.isNaN(currentStart.getTime()) && currentStart.getTime() > 0) return;
+    account.balanceStartedAt = recognitionDate.toISOString();
+    account.updatedAt = new Date().toISOString();
+  });
 }
 
 function transactionsForCreditBillPeriod(account, month) {
   const period = getCreditBillPeriod(account, month);
   return state.transactions
-    .filter((item) => item.accountId === account.id)
+    .filter((item) => item.accountId === account.id || (item.type === "transfer" && item.targetAccountId === account.id))
     .filter((item) => {
-      const date = new Date(item.date);
+      if (item.creditBillAccountId === account.id && /^\d{4}-\d{2}$/.test(item.creditBillMonth || "")) {
+        return item.creditBillMonth === month;
+      }
+      const date = transactionLocalDateTime(item);
       return date >= period.start && date < period.endExclusive;
     });
 }
@@ -2287,7 +2855,13 @@ function getCategoryExpenseTotals(transactions, selectedCurrency = null) {
 }
 
 function enabledCategories(type) {
-  return state.categories.filter((item) => item.enabled && item.type === type).sort((a, b) => a.sortOrder - b.sortOrder);
+  return state.categories.filter((item) => item.enabled && !item.archived && item.type === type).sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function currentCategoryFallbackId(type, excludedId = "") {
+  const categories = enabledCategories(type).filter((item) => item.id !== excludedId);
+  const preferredId = type === "income" ? "other-income" : "other-expense";
+  return categories.find((item) => item.id === preferredId)?.id || categories[0]?.id || "";
 }
 
 function findCategory(id) {
@@ -2310,7 +2884,7 @@ function groupInstallmentBills(items) {
   });
   return [...groups.entries()]
     .map(([id, rows]) => {
-      const sorted = rows.sort((a, b) => (a.installmentIndex || 0) - (b.installmentIndex || 0) || new Date(a.date) - new Date(b.date));
+      const sorted = rows.sort((a, b) => (a.installmentIndex || 0) - (b.installmentIndex || 0) || transactionLocalDateTime(a) - transactionLocalDateTime(b));
       const first = sorted[0];
       return {
         id,
@@ -2321,7 +2895,7 @@ function groupInstallmentBills(items) {
         items: sorted,
       };
     })
-    .sort((a, b) => new Date(a.items[0].date) - new Date(b.items[0].date));
+    .sort((a, b) => transactionLocalDateTime(a.items[0]) - transactionLocalDateTime(b.items[0]));
 }
 
 function installmentBaseTitle(item) {
@@ -2370,7 +2944,7 @@ function getAccountBalances(id) {
   }));
 }
 
-function getTotalAssetsByCurrency() {
+function getNetAssetsByCurrency() {
   return getAssetValuesByCurrency("net");
 }
 
@@ -2418,10 +2992,18 @@ function netByCurrency(transactions) {
   }, new Map());
 }
 
-function creditBillTotalByCurrency(transactions) {
+function creditBillImpact(item, accountId) {
+  if (item.type === "expense" && item.accountId === accountId) return 1;
+  if (item.type === "income" && item.accountId === accountId) return -1;
+  if (item.type === "transfer" && item.targetAccountId === accountId) return -1;
+  if (item.type === "transfer" && item.accountId === accountId) return 1;
+  return 0;
+}
+
+function creditBillTotalByCurrency(transactions, accountId) {
   return transactions.reduce((totals, item) => {
     const currency = transactionCurrency(item);
-    const direction = item.type === "income" ? -1 : 1;
+    const direction = creditBillImpact(item, accountId);
     totals.set(currency, (totals.get(currency) || 0) + item.amount * direction);
     return totals;
   }, new Map());
@@ -2430,6 +3012,10 @@ function creditBillTotalByCurrency(transactions) {
 function formatCurrencyTotals(totals) {
   const entries = sortedCurrencyEntries(totals);
   return entries.length ? entries.map(([currency, value]) => money(value, currency)).join(" · ") : money(0, "CNY");
+}
+
+function formatSelectedCurrencyTotal(totals) {
+  return money(totals.get(summaryCurrency) || 0, summaryCurrency);
 }
 
 function sortedCurrencyEntries(totals) {
@@ -2454,7 +3040,7 @@ function renderAssetTotals(totals) {
 function renderDashboardAssetTotals(totals) {
   const entries = sortedCurrencyEntries(totals);
   const rows = entries.length ? entries : [["CNY", 0]];
-  document.querySelector("#dashboardTotalAssets").innerHTML = rows
+  document.querySelector("#dashboardNetAssets").innerHTML = rows
     .map(([currency, value], index) => `<div class="metric-currency-item ${index === 0 ? "is-primary" : ""}">
       <span>${currency}</span>
       <strong>${money(value, currency)}</strong>
@@ -2495,6 +3081,9 @@ function transactionCurrency(item) {
 }
 
 function loadState() {
+  if (DEMO_MODE && window.JIZHANGBEN_DEMO_STATE) {
+    return migrateState(cloneLedger(window.JIZHANGBEN_DEMO_STATE));
+  }
   LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -2520,13 +3109,18 @@ function migrateState(savedState) {
   if (!Array.isArray(savedState.categories) || !savedState.categories.length) {
     savedState.categories = defaultCategories.map((item) => ({ ...item }));
   }
-  savedState.categories = savedState.categories.map((category) => ({
+  savedState.categories = savedState.categories.map((category, index) => ({
     ...category,
     icon: normalizeStoredCategoryIcon(category.icon),
     color: defaultColorById[category.id] || category.color,
+    archived: category.archived === true,
+    enabled: category.archived === true ? false : category.enabled !== false,
+    sortOrder: Number.isFinite(Number(category.sortOrder)) ? Number(category.sortOrder) : index,
+    createdAt: validIsoTimestamp(category.createdAt),
+    updatedAt: validIsoTimestamp(category.updatedAt || category.archivedAt || category.createdAt),
   }));
   if (!Array.isArray(savedState.accounts) || !savedState.accounts.length) savedState.accounts = defaultAccounts;
-  savedState.accounts = savedState.accounts.map((account) => {
+  savedState.accounts = savedState.accounts.map((account, index) => {
     const normalizedType = accountTypeAliases[account.type] || account.type;
     const type = shouldMigrateToCreditCard(account) ? "credit_card" : accountTypes[normalizedType] ? normalizedType : "other";
     const legacyCurrency = supportedCurrencies.includes(account.currency) ? account.currency : "CNY";
@@ -2560,18 +3154,58 @@ function migrateState(savedState) {
       billingDay: type === "credit_card" ? Math.min(28, Math.max(1, Number(account.billingDay || 1))) : 1,
       dueDay: type === "credit_card" ? Math.min(28, Math.max(1, Number(account.dueDay || 20))) : 20,
       includeInAssets: account.includeInAssets !== false,
+      sortOrder: Number.isFinite(Number(account.sortOrder)) ? Number(account.sortOrder) : index,
+      createdAt: validIsoTimestamp(account.createdAt),
+      updatedAt: validIsoTimestamp(account.updatedAt || account.createdAt),
     };
   });
   if (!Array.isArray(savedState.quickTemplates)) savedState.quickTemplates = defaultQuickTemplates;
   if (!Array.isArray(savedState.transactions)) savedState.transactions = [];
-  savedState.transactions = savedState.transactions.map((transaction) => ({
-    ...transaction,
-    currency: supportedCurrencies.includes(transaction.currency)
-      ? transaction.currency
-      : savedState.accounts.find((account) => account.id === transaction.accountId)?.currency || "CNY",
-  }));
+  savedState.transactions = savedState.transactions.map((transaction) => {
+    const timestamp = new Date(transaction.date);
+    const validTimestamp = !Number.isNaN(timestamp.getTime());
+    const localDate = isValidLocalDateKey(transaction.localDate)
+      ? transaction.localDate
+      : validTimestamp
+        ? toDateInput(timestamp)
+        : toDateInput(new Date());
+    const localTime = isValidLocalTimeKey(transaction.localTime)
+      ? transaction.localTime
+      : validTimestamp
+        ? `${String(timestamp.getHours()).padStart(2, "0")}:${String(timestamp.getMinutes()).padStart(2, "0")}`
+        : "00:00";
+    return {
+      ...transaction,
+      localDate,
+      localTime,
+      currency: supportedCurrencies.includes(transaction.currency)
+        ? transaction.currency
+        : savedState.accounts.find((account) => account.id === transaction.accountId)?.currency || "CNY",
+      createdAt: validIsoTimestamp(transaction.createdAt || transaction.date),
+      updatedAt: validIsoTimestamp(transaction.updatedAt || transaction.createdAt || transaction.date),
+    };
+  });
+  savedState.accounts = savedState.accounts.map((account) => {
+    const explicitStart = new Date(account.balanceStartedAt || 0);
+    if (!Number.isNaN(explicitStart.getTime()) && explicitStart.getTime() > 0) {
+      return { ...account, balanceStartedAt: explicitStart.toISOString() };
+    }
+    const createdTime = new Date(account.createdAt || 0);
+    if (!Number.isNaN(createdTime.getTime()) && createdTime.getTime() > 0) {
+      return { ...account, balanceStartedAt: createdTime.toISOString() };
+    }
+    const relatedDates = savedState.transactions
+      .filter((item) => item.accountId === account.id || item.targetAccountId === account.id)
+      .map(transactionBalanceRecognitionDate)
+      .filter((date) => !Number.isNaN(date.getTime()))
+      .sort((a, b) => a - b);
+    const updatedTime = new Date(account.updatedAt || 0);
+    const inferredStart = relatedDates[0]
+      || (!Number.isNaN(updatedTime.getTime()) && updatedTime.getTime() > 0 ? updatedTime : new Date(0));
+    return { ...account, balanceStartedAt: inferredStart.toISOString() };
+  });
   const fallbackAccountId = savedState.accounts.find((account) => account.id === "alipay")?.id || savedState.accounts[0].id;
-  savedState.quickTemplates = savedState.quickTemplates.map((template) => {
+  savedState.quickTemplates = savedState.quickTemplates.map((template, index) => {
     const accountId = savedState.accounts.some((account) => account.id === template.accountId)
       ? template.accountId
       : fallbackAccountId;
@@ -2583,12 +3217,30 @@ function migrateState(savedState) {
       ...template,
       accountId,
       currency: currencies.includes(template.currency) ? template.currency : currencies[0] || "CNY",
+      sortOrder: Number.isFinite(Number(template.sortOrder)) ? Number(template.sortOrder) : index,
+      createdAt: validIsoTimestamp(template.createdAt),
+      updatedAt: validIsoTimestamp(template.updatedAt || template.createdAt),
     };
+  });
+  const rawTombstones = savedState.syncTombstones && typeof savedState.syncTombstones === "object"
+    ? savedState.syncTombstones
+    : createEmptyTombstones();
+  savedState.syncTombstones = createEmptyTombstones();
+  Object.keys(savedState.syncTombstones).forEach((collection) => {
+    const seenIds = new Set();
+    savedState.syncTombstones[collection] = (Array.isArray(rawTombstones[collection]) ? rawTombstones[collection] : [])
+      .filter((item) => {
+        if (!item?.id || seenIds.has(item.id)) return false;
+        seenIds.add(item.id);
+        return true;
+      })
+      .map((item) => ({ id: item.id, deletedAt: validIsoTimestamp(item.deletedAt) }));
   });
   return savedState;
 }
 
 function saveState() {
+  localChangeVersion += 1;
   saveLocalState();
   queueCloudSave();
 }
@@ -2639,6 +3291,46 @@ function signedMoney(item) {
 
 function typeLabel(type) {
   return { expense: "支出", income: "收入", transfer: "转账" }[type] || type;
+}
+
+function isValidLocalDateKey(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const date = parseLocalDate(value);
+  return Boolean(date) && toDateInput(date) === value;
+}
+
+function isValidLocalTimeKey(value) {
+  if (!/^\d{2}:\d{2}$/.test(value || "")) return false;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
+function transactionDateKey(item) {
+  if (isValidLocalDateKey(item?.localDate)) return item.localDate;
+  const date = new Date(item?.date);
+  return Number.isNaN(date.getTime()) ? toDateInput(new Date()) : toDateInput(date);
+}
+
+function transactionTimeKey(item) {
+  if (isValidLocalTimeKey(item?.localTime)) return item.localTime;
+  const date = new Date(item?.date);
+  return Number.isNaN(date.getTime())
+    ? "00:00"
+    : `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function transactionLocalDateTime(item) {
+  const value = new Date(`${transactionDateKey(item)}T${transactionTimeKey(item)}:00`);
+  return Number.isNaN(value.getTime()) ? new Date(item?.date) : value;
+}
+
+function toTransactionDateTimeInput(item) {
+  return `${transactionDateKey(item)}T${transactionTimeKey(item)}`;
+}
+
+function formatTransactionDate(item) {
+  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .format(transactionLocalDateTime(item));
 }
 
 function formatDate(value) {

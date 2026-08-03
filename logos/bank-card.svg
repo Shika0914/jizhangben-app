@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" shape-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="cardPaper" x1="14" y1="12" x2="50" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F3F3F1"/>
+    </linearGradient>
+    <linearGradient id="cardChip" x1="22" y1="26" x2="31" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E5E5E2"/>
+    </linearGradient>
+  </defs>
+  <rect x="9" y="17" width="43" height="33" rx="7" fill="#F1F1EF" stroke="#171917" stroke-width="2.6"/>
+  <rect x="14" y="11" width="43" height="33" rx="7" fill="url(#cardPaper)" stroke="#171917" stroke-width="2.8"/>
+  <rect x="21" y="24" width="11" height="9" rx="2" fill="url(#cardChip)" stroke="#171917" stroke-width="1.5"/>
+  <path d="M20 38H35M40 38H44M49 38H52" stroke="#171917" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

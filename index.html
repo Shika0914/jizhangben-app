@@ -4,9 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#173c36" />
+    <meta name="application-version" content="3.1" />
     <title>记账本 - 个人记账</title>
     <link id="appFavicon" rel="icon" href="./assets/icons/app-logo.svg?v=3" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=beauty-25" />
+    <link rel="stylesheet" href="./styles.css?v=beauty-32" />
   </head>
   <body>
     <div class="app-shell">
@@ -64,6 +65,12 @@
         </header>
 
         <section class="view active" id="dashboardView">
+          <div class="summary-currency-row">
+            <label class="summary-currency-control" for="dashboardSummaryCurrency">
+              <span>汇总币种</span>
+              <select id="dashboardSummaryCurrency" aria-label="总览汇总币种"></select>
+            </label>
+          </div>
           <div class="metric-grid">
             <article class="metric">
               <span>本月支出</span>
@@ -85,8 +92,8 @@
 
           <section class="dashboard-asset-summary">
             <div>
-              <span>总资产</span>
-              <div class="metric-currency-list" id="dashboardTotalAssets" aria-live="polite"></div>
+              <span>净资产</span>
+              <div class="metric-currency-list" id="dashboardNetAssets" aria-live="polite"></div>
             </div>
             <button class="link-button" data-view-jump="assets" type="button">查看资产</button>
           </section>
@@ -175,10 +182,10 @@
           <section class="asset-summary">
             <div class="asset-summary-main">
               <div class="asset-summary-mode-row">
-                <span id="assetValueLabel">总资产</span>
+                <span id="assetValueLabel">净资产</span>
                 <div class="asset-value-switch asset-value-switch-dark" role="group" aria-label="资产金额口径">
-                  <button class="asset-value-button active" type="button" data-assets-value-mode="total" aria-pressed="true">总资产</button>
-                  <button class="asset-value-button" type="button" data-assets-value-mode="net" aria-pressed="false">净资产</button>
+                  <button class="asset-value-button" type="button" data-assets-value-mode="total" aria-pressed="false">总资产</button>
+                  <button class="asset-value-button active" type="button" data-assets-value-mode="net" aria-pressed="true">净资产</button>
                 </div>
               </div>
               <div class="asset-total-list" id="totalAssets" aria-live="polite"></div>
@@ -190,7 +197,7 @@
             <div class="panel-heading">
               <div>
                 <h2>我的钱包</h2>
-                <span class="panel-note" id="includedAccountCount">0 个计入总资产</span>
+                <span class="panel-note" id="includedAccountCount">0 个计入资产统计</span>
               </div>
               <button class="primary-button" id="openAccountModal" type="button">新增钱包</button>
             </div>
@@ -234,6 +241,12 @@
               <label>
                 日期
                 <input name="date" type="datetime-local" required />
+              </label>
+              <label class="credit-bill-period-field" hidden>
+                信用卡账期
+                <select name="creditBillMonth">
+                  <option value="">按交易日期自动归期</option>
+                </select>
               </label>
               <label>
                 标签
@@ -281,6 +294,12 @@
               </select>
               <select id="categoryFilter"></select>
               <select id="accountFilter"></select>
+            </div>
+            <div class="summary-currency-row bill-summary-currency-row">
+              <label class="summary-currency-control" for="billSummaryCurrency">
+                <span>汇总币种</span>
+                <select id="billSummaryCurrency" aria-label="账单汇总币种"></select>
+              </label>
             </div>
             <div class="bill-summary" id="billSummary"></div>
             <div class="bulk-toolbar" id="bulkToolbar">
@@ -423,15 +442,15 @@
             <div class="stats-period-controls">
               <label class="stats-period-field" data-stats-period="week" hidden>
                 <span>所在周</span>
-                <input id="statsWeekDate" type="date" />
+                <input class="stats-date-control" id="statsWeekDate" type="date" />
               </label>
               <label class="stats-period-field" data-stats-period="month">
                 <span>月份</span>
-                <input id="statsMonthValue" type="month" />
+                <input class="stats-date-control" id="statsMonthValue" type="month" />
               </label>
               <label class="stats-period-field" data-stats-period="year" hidden>
                 <span>年份</span>
-                <input id="statsYearValue" type="number" min="2000" max="2100" step="1" inputmode="numeric" />
+                <select class="stats-date-control" id="statsYearValue" aria-label="选择年报年份"></select>
               </label>
               <label class="stats-currency-field" for="statsCurrency">
                 <span>统计币种</span>
@@ -539,6 +558,7 @@
                 <button class="link-button" id="addAccountBalance" type="button">＋ 添加币种</button>
               </div>
               <div class="balance-row-list" id="accountBalanceRows"></div>
+              <p class="account-balance-hint" id="creditOpeningDebtHint" hidden>新增信用卡时，填写的欠款将自动记为本期“其他”支出。</p>
             </div>
             <div class="credit-card-fields" id="creditCardFields" hidden>
               <label>
@@ -556,7 +576,7 @@
             </div>
             <label class="checkbox-line">
               <input name="includeInAssets" type="checkbox" checked />
-              计入总资产
+              计入资产统计
             </label>
           </div>
           <div class="modal-actions">
@@ -598,6 +618,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/vendor/supabase.js?v=1"></script>
-    <script src="./app.js?v=beauty-27"></script>
+    <script src="./mock-data.js?v=1"></script>
+    <script src="./app.js?v=beauty-40"></script>
   </body>
 </html>
