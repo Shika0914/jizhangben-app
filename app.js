@@ -132,6 +132,9 @@ let statsReportMode = "month";
 let assetsValueMode = "net";
 let statsAssetValueMode = "net";
 let summaryCurrency = "CNY";
+let statsPage = "overview";
+const statsExcludedCategories = new Set();
+const statsExcludedTags = new Set();
 
 const el = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -199,9 +202,13 @@ function bindEvents() {
   });
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".brand-logo-control")) closeLogoPicker();
+    if (!event.target.closest(".period-year-picker, .period-month-picker, .period-day-picker")) closePeriodMenus();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeLogoPicker();
+    if (event.key === "Escape") {
+      closeLogoPicker();
+      closePeriodMenus();
+    }
   });
   el.tabs.forEach((tab) => tab.addEventListener("click", () => switchView(tab.dataset.view)));
   document.querySelectorAll("[data-view-jump]").forEach((button) => {
@@ -256,6 +263,9 @@ function bindEvents() {
   document.querySelectorAll("[data-stats-mode]").forEach((button) => {
     button.addEventListener("click", () => changeStatsReportMode(button.dataset.statsMode));
   });
+  document.querySelectorAll("[data-stats-page]").forEach((button) => {
+    button.addEventListener("click", () => changeStatsPage(button.dataset.statsPage));
+  });
   document.querySelectorAll("[data-assets-value-mode]").forEach((button) => {
     button.addEventListener("click", () => changeAssetsValueMode(button.dataset.assetsValueMode));
   });
@@ -265,6 +275,9 @@ function bindEvents() {
   [el.statsWeekDate, el.statsMonthValue, el.statsYearValue].forEach((field) => {
     field.addEventListener("change", renderStats);
   });
+  document.querySelector("#statsView").addEventListener("change", handleStatsFilterChange);
+  document.querySelector("#statsView").addEventListener("click", handleStatsFilterClick);
+  document.querySelector("#statsView").addEventListener("keydown", handleStatsFilterKeydown);
   el.categoryForm.addEventListener("submit", saveCategory);
   [el.categoryForm.name, el.categoryForm.color].forEach((field) => {
     field.addEventListener("input", updateCategoryPreview);
@@ -912,8 +925,8 @@ function switchView(view) {
 }
 
 function renderAll() {
+  fillPeriodSelects();
   fillSelects();
-  fillStatsYearOptions();
   updateInstallmentFields();
   renderDashboard();
   renderAssets();
@@ -925,19 +938,198 @@ function renderAll() {
   document.querySelectorAll("select").forEach(syncSelectDisplay);
 }
 
-function fillStatsYearOptions() {
+function periodYearBounds(extraValues = []) {
   const currentYear = today.getFullYear();
-  const selectedYear = Number(el.statsYearValue.value) || currentYear;
-  const years = new Set([currentYear, selectedYear]);
-  state.transactions.forEach((item) => {
-    const year = Number(transactionDateKey(item).slice(0, 4));
-    if (year >= 2000 && year <= 2100) years.add(year);
-  });
-  el.statsYearValue.innerHTML = [...years]
-    .sort((a, b) => b - a)
-    .map((year) => `<option value="${year}">${year} 年</option>`)
+  const years = state.transactions
+    .map((item) => Number(transactionDateKey(item).slice(0, 4)))
+    .concat(extraValues.map((value) => Number(String(value || "").slice(0, 4))))
+    .filter((year) => year >= 2000 && year <= 2100);
+  return {
+    min: Math.min(currentYear - 5, ...years),
+    max: Math.max(currentYear + 2, ...years),
+  };
+}
+
+function fillPeriodSelects() {
+  renderPeriodCascade(el.monthPicker, "month", state.selectedMonth || currentMonth);
+  renderPeriodCascade(el.statsMonthValue, "month", el.statsMonthValue.value || currentMonth);
+  renderPeriodCascade(document.querySelector("#creditBillMonth"), "month", selectedCreditMonth || currentMonth);
+  renderPeriodCascade(el.statsWeekDate, "date", el.statsWeekDate.value || toDateInput(today));
+  renderPeriodCascade(el.statsYearValue, "year", el.statsYearValue.value || String(today.getFullYear()));
+  renderPeriodCascade(el.transactionForm.date, "datetime", el.transactionForm.date.value || toDateTimeInput(today));
+  renderPeriodCascade(el.transactionForm.installmentStartDate, "date", el.transactionForm.installmentStartDate.value || toDateInput(today));
+}
+
+function renderPeriodCascade(target, kind, selectedValue, options = {}) {
+  const host = document.querySelector(`[data-period-target="${target.id}"]`);
+  if (!host) return;
+  const fallbackDate = new Date(today);
+  const hasDay = kind === "date" || kind === "datetime";
+  const parsedDate = hasDay ? parseLocalDate(String(selectedValue || "").slice(0, 10)) : null;
+  const timeMatch = kind === "datetime" ? String(selectedValue || "").match(/T(\d{2}):(\d{2})/) : null;
+  const selectedHour = timeMatch ? Number(timeMatch[1]) : fallbackDate.getHours();
+  const selectedMinute = timeMatch ? Number(timeMatch[2]) : fallbackDate.getMinutes();
+  const selectedYear = Number(String(selectedValue || "").slice(0, 4)) || fallbackDate.getFullYear();
+  const selectedMonth = hasDay
+    ? (parsedDate || fallbackDate).getMonth() + 1
+    : Number(String(selectedValue || "").slice(5, 7)) || fallbackDate.getMonth() + 1;
+  const requestedDay = hasDay ? (parsedDate || fallbackDate).getDate() : 1;
+  const selectedDay = Math.min(requestedDay, new Date(selectedYear, selectedMonth, 0).getDate());
+  const bounds = periodYearBounds([selectedValue]);
+  const isAutomatic = options.allowAuto && !selectedValue;
+  const yearOptions = Array.from({ length: bounds.max - bounds.min + 1 }, (_, index) => bounds.max - index)
+    .map((year) => `<button class="period-year-option ${!isAutomatic && year === selectedYear ? "active" : ""}" type="button" data-period-year="${year}" aria-pressed="${!isAutomatic && year === selectedYear}">${year} 年</button>`)
     .join("");
-  el.statsYearValue.value = String(selectedYear);
+  const yearMarkup = options.allowAuto
+    ? `<button class="period-year-option period-year-auto ${isAutomatic ? "active" : ""}" type="button" data-period-year="" aria-pressed="${isAutomatic}">${escapeHtml(options.autoLabel || "自动归期")}</button>${yearOptions}`
+    : yearOptions;
+  const monthMarkup = Array.from({ length: 12 }, (_, index) => index + 1)
+    .map((month) => `<button class="period-month-option ${month === selectedMonth ? "active" : ""}" type="button" data-period-month="${month}" aria-pressed="${month === selectedMonth}">${month} 月</button>`)
+    .join("");
+  const firstWeekday = (new Date(selectedYear, selectedMonth - 1, 1).getDay() + 6) % 7;
+  const dayMarkup = ["一", "二", "三", "四", "五", "六", "日"]
+    .map((label) => `<span class="period-day-weekday" aria-hidden="true">${label}</span>`)
+    .concat(Array.from({ length: firstWeekday }, () => `<span class="period-day-spacer" aria-hidden="true"></span>`))
+    .concat(Array.from({ length: new Date(selectedYear, selectedMonth, 0).getDate() }, (_, index) => index + 1)
+      .map((day) => `<button class="period-day-option ${day === selectedDay ? "active" : ""}" type="button" data-period-day="${day}" aria-pressed="${day === selectedDay}">${day}</button>`))
+    .join("");
+  const hourMarkup = Array.from({ length: 24 }, (_, hour) => `<option value="${hour}" ${hour === selectedHour ? "selected" : ""}>${String(hour).padStart(2, "0")}</option>`).join("");
+  const minuteMarkup = Array.from({ length: 60 }, (_, minute) => `<option value="${minute}" ${minute === selectedMinute ? "selected" : ""}>${String(minute).padStart(2, "0")}</option>`).join("");
+
+  host.classList.toggle("is-date", hasDay);
+  host.classList.toggle("is-datetime", kind === "datetime");
+  host.classList.toggle("is-year", kind === "year");
+  host.classList.toggle("is-disabled", target.disabled);
+  host.innerHTML = `
+    <details class="period-year-picker period-picker-details">
+      <summary class="period-picker-control period-year-trigger" data-period-year-value="${isAutomatic ? "" : selectedYear}" aria-haspopup="dialog">
+        <span>${isAutomatic ? escapeHtml(options.autoLabel || "自动归期") : `${selectedYear} 年`}</span><span class="period-picker-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="period-year-menu period-popover" role="dialog" aria-label="选择年份">${yearMarkup}</div>
+    </details>
+    ${kind !== "year" ? `<details class="period-month-picker period-picker-details ${isAutomatic ? "is-disabled" : ""}">
+      <summary class="period-picker-control period-month-trigger" data-period-month-value="${selectedMonth}" aria-haspopup="dialog" aria-disabled="${isAutomatic}">
+        <span>${selectedMonth} 月</span><span class="period-picker-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="period-month-menu period-popover" role="dialog" aria-label="选择月份">${monthMarkup}</div>
+    </details>` : ""}
+    ${hasDay ? `<details class="period-day-picker period-picker-details">
+      <summary class="period-picker-control period-day-trigger" data-period-day-value="${selectedDay}" aria-haspopup="dialog">
+        <span>${selectedDay} 日</span><span class="period-picker-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="period-day-menu period-popover" role="dialog" aria-label="选择日期">${dayMarkup}</div>
+    </details>` : ""}
+    ${kind === "datetime" ? `<div class="period-time-picker" aria-label="选择时间">
+      <select class="period-picker-control" data-period-part="hour" aria-label="小时">${hourMarkup}</select>
+      <span aria-hidden="true">:</span>
+      <select class="period-picker-control" data-period-part="minute" aria-label="分钟">${minuteMarkup}</select>
+    </div>` : ""}
+  `;
+  if (target.disabled) host.querySelectorAll("button, select").forEach((control) => { control.disabled = true; });
+
+  if (isAutomatic) target.value = "";
+  else if (kind === "year") target.value = String(selectedYear);
+  else if (kind === "month") target.value = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`;
+  else if (kind === "date") target.value = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(selectedDay).padStart(2, "0")}`;
+  else target.value = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(selectedDay).padStart(2, "0")}T${String(selectedHour).padStart(2, "0")}:${String(selectedMinute).padStart(2, "0")}`;
+
+  host.querySelectorAll("select").forEach(syncSelectDisplay);
+  host.querySelectorAll(".period-picker-details").forEach((details) => {
+    details.ontoggle = () => {
+      if (details.open) closePeriodMenus(details.querySelector(".period-popover"));
+    };
+  });
+  const yearTrigger = host.querySelector(".period-year-trigger");
+  const yearMenu = host.querySelector(".period-year-menu");
+  if (yearTrigger && yearMenu) {
+    yearMenu.querySelectorAll("[data-period-year]").forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        const year = Number(button.dataset.periodYear);
+        const month = Number(host.querySelector(".period-month-trigger")?.dataset.periodMonthValue || selectedMonth);
+        const day = Number(host.querySelector(".period-day-trigger")?.dataset.periodDayValue || selectedDay);
+        const hour = Number(host.querySelector('[data-period-part="hour"]')?.value || selectedHour);
+        const minute = Number(host.querySelector('[data-period-part="minute"]')?.value || selectedMinute);
+        let nextValue = "";
+        if (year) {
+          if (kind === "year") nextValue = String(year);
+          else if (kind === "month") nextValue = `${year}-${String(month).padStart(2, "0")}`;
+          else {
+            const safeDay = Math.min(day, new Date(year, month, 0).getDate());
+            nextValue = `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+            if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+          }
+        }
+        renderPeriodCascade(target, kind, nextValue, options);
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+    });
+  }
+  const monthTrigger = host.querySelector(".period-month-trigger");
+  const monthMenu = host.querySelector(".period-month-menu");
+  if (monthTrigger && monthMenu) {
+    monthMenu.querySelectorAll("[data-period-month]").forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        const year = Number(host.querySelector(".period-year-trigger").dataset.periodYearValue);
+        const month = Number(button.dataset.periodMonth);
+        const day = Number(host.querySelector(".period-day-trigger")?.dataset.periodDayValue || 1);
+        const hour = Number(host.querySelector('[data-period-part="hour"]')?.value || selectedHour);
+        const minute = Number(host.querySelector('[data-period-part="minute"]')?.value || selectedMinute);
+        const safeDay = Math.min(day, new Date(year, month, 0).getDate());
+        let nextValue = kind === "month"
+          ? `${year}-${String(month).padStart(2, "0")}`
+          : `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+        if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        renderPeriodCascade(target, kind, nextValue, options);
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+    });
+  }
+  const dayTrigger = host.querySelector(".period-day-trigger");
+  const dayMenu = host.querySelector(".period-day-menu");
+  if (dayTrigger && dayMenu) {
+    dayMenu.querySelectorAll("[data-period-day]").forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        const year = Number(host.querySelector(".period-year-trigger").dataset.periodYearValue);
+        const month = Number(host.querySelector(".period-month-trigger").dataset.periodMonthValue);
+        const day = Number(button.dataset.periodDay);
+        const hour = Number(host.querySelector('[data-period-part="hour"]')?.value || selectedHour);
+        const minute = Number(host.querySelector('[data-period-part="minute"]')?.value || selectedMinute);
+        let nextValue = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        renderPeriodCascade(target, kind, nextValue, options);
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+    });
+  }
+  host.onchange = () => {
+    const year = Number(host.querySelector(".period-year-trigger").dataset.periodYearValue);
+    const month = Number(host.querySelector(".period-month-trigger")?.dataset.periodMonthValue || 1);
+    const day = Number(host.querySelector(".period-day-trigger")?.dataset.periodDayValue || 1);
+    const hour = Number(host.querySelector('[data-period-part="hour"]')?.value || selectedHour);
+    const minute = Number(host.querySelector('[data-period-part="minute"]')?.value || selectedMinute);
+    let nextValue = "";
+    if (year) {
+      if (kind === "year") nextValue = String(year);
+      else if (kind === "month") nextValue = `${year}-${String(month).padStart(2, "0")}`;
+      else {
+        const safeDay = Math.min(day, new Date(year, month, 0).getDate());
+        nextValue = `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+        if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      }
+    }
+    renderPeriodCascade(target, kind, nextValue, options);
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+}
+
+function closePeriodMenus(except = null) {
+  document.querySelectorAll(".period-picker-details[open]").forEach((details) => {
+    if (details.querySelector(".period-popover") === except) return;
+    details.open = false;
+  });
 }
 
 function renderDashboard() {
@@ -949,6 +1141,14 @@ function renderDashboard() {
   setText("monthBalance", formatSelectedCurrencyTotal(netByCurrency(transactions)));
   setText("todayExpense", formatSelectedCurrencyTotal(sumByCurrency(todayTransactions, "expense")));
   renderDashboardAssetTotals(getNetAssetsByCurrency());
+  const dashboardIncluded = state.accounts.filter((account) => account.includeInAssets);
+  const dashboardExcludedCount = state.accounts.length - dashboardIncluded.length;
+  setText(
+    "dashboardAssetSummary",
+    `已扣除负余额 · ${
+      dashboardExcludedCount ? `共 ${state.accounts.length} 个钱包，${dashboardExcludedCount} 个未计入` : `共 ${state.accounts.length} 个钱包，已全部计入`
+    }`
+  );
 
   const recent = state.transactions
     .filter(isPostedTransaction)
@@ -1070,20 +1270,24 @@ function renderCategoryGroup(group) {
 function renderStats() {
   const currency = el.statsCurrency.value || "CNY";
   const period = getStatsReportPeriod();
-  const transactions = transactionsForDateRange(period.start, period.end)
+  const rawTransactions = transactionsForDateRange(period.start, period.end)
     .filter(isPostedTransaction)
     .filter((item) => transactionCurrency(item) === currency);
+  const transactions = filterStatsTransactions(rawTransactions);
   const expenses = transactions.filter((item) => item.type === "expense");
+  const incomes = transactions.filter((item) => item.type === "income");
   const expense = sumByType(transactions, "expense");
   const income = sumByType(transactions, "income");
   const savingRate = income > 0 ? Math.round(((income - expense) / income) * 100) : 0;
   const categoryTotals = getCategoryExpenseTotals(transactions, currency);
+  const incomeTotals = getCategoryIncomeTotals(transactions, currency);
   const largest = categoryTotals[0];
   const biggestBill = [...expenses].sort((a, b) => b.amount - a.amount)[0];
   const previousExpense = sumByType(
     transactionsForDateRange(period.previousStart, period.start)
       .filter(isPostedTransaction)
-      .filter((item) => transactionCurrency(item) === currency),
+      .filter((item) => transactionCurrency(item) === currency)
+      .filter((item) => passesStatsFilters(item)),
     "expense"
   );
 
@@ -1100,6 +1304,60 @@ function renderStats() {
   renderStatsTrend(transactions, currency, period);
   renderNetWorthTrend(currency, period, statsAssetValueMode);
   renderCategoryShare(categoryTotals, expense, currency);
+  renderIncomeShare(incomeTotals, income, currency);
+  renderSpendingAnalysis(transactions, categoryTotals, expense, currency);
+  renderIncomeAnalysis(transactions, incomeTotals, income, currency);
+  renderStatsFilters();
+}
+
+function changeStatsPage(page) {
+  if (!["overview", "expense", "income"].includes(page)) return;
+  statsPage = page;
+  document.querySelectorAll("[data-stats-page]").forEach((button) => {
+    const active = button.dataset.statsPage === page;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelectorAll("[data-stats-page-panel]").forEach((panel) => {
+    const active = panel.dataset.statsPagePanel === page;
+    panel.hidden = !active;
+    panel.classList.toggle("active", active);
+  });
+}
+
+function handleStatsFilterChange(event) {
+  const checkbox = event.target.closest("[data-stats-filter-category]");
+  if (!checkbox) return;
+  if (checkbox.checked) statsExcludedCategories.add(checkbox.value);
+  else statsExcludedCategories.delete(checkbox.value);
+  renderStats();
+}
+
+function handleStatsFilterClick(event) {
+  const addButton = event.target.closest("[data-add-stats-tag-filter]");
+  if (addButton) {
+    const input = addButton.closest(".stats-inline-filter")?.querySelector("[data-stats-tag-filter-input]");
+    addStatsTagFilter(input);
+    return;
+  }
+  const removeButton = event.target.closest("[data-remove-stats-tag]");
+  if (removeButton) {
+    statsExcludedTags.delete(removeButton.dataset.removeStatsTag);
+    renderStats();
+    return;
+  }
+  if (event.target.closest("[data-reset-stats-filters]")) {
+    statsExcludedCategories.clear();
+    statsExcludedTags.clear();
+    renderStats();
+  }
+}
+
+function handleStatsFilterKeydown(event) {
+  const input = event.target.closest("[data-stats-tag-filter-input]");
+  if (!input || event.key !== "Enter") return;
+  event.preventDefault();
+  addStatsTagFilter(input);
 }
 
 function changeStatsReportMode(mode) {
@@ -1392,8 +1650,19 @@ function renderNetWorthTrend(currency, period, mode) {
     const pointY = y(point.value);
     const showValue = index % showEvery === 0 || extrema.has(index);
     const showLabel = period.mode !== "month" || index === 0 || index % 5 === 0 || index === points.length - 1;
-    return `<g>
-      <circle cx="${pointX}" cy="${pointY}" r="4" class="net-point"><title>${escapeHtml(point.label)} ${money(point.value, currency)}</title></circle>
+    const tooltipWidth = 134;
+    const tooltipHeight = 50;
+    const tooltipX = Math.min(Math.max(pointX - tooltipWidth / 2, 8), width - tooltipWidth - 8);
+    const tooltipY = pointY > 92 ? pointY - tooltipHeight - 18 : pointY + 20;
+    const tooltipValue = money(point.value, currency);
+    return `<g class="net-hover-group" tabindex="0" aria-label="${escapeHtml(point.label)} ${escapeHtml(tooltipValue)}">
+      <circle cx="${pointX}" cy="${pointY}" r="16" class="net-hit-area"></circle>
+      <circle cx="${pointX}" cy="${pointY}" r="4" class="net-point"></circle>
+      <g class="net-tooltip" transform="translate(${tooltipX} ${tooltipY})">
+        <rect width="${tooltipWidth}" height="${tooltipHeight}" rx="8"></rect>
+        <text x="12" y="19" class="net-tooltip-label">${escapeHtml(point.label)}</text>
+        <text x="12" y="37" class="net-tooltip-value">${escapeHtml(tooltipValue)}</text>
+      </g>
       ${showValue ? `<text x="${pointX}" y="${Math.max(16, pointY - 12)}" text-anchor="middle" class="net-point-value">${compactMoney(point.value, currency)}</text>` : ""}
       ${showLabel ? `<text x="${pointX}" y="${height - 14}" text-anchor="middle" class="net-axis-label">${escapeHtml(point.label)}</text>` : ""}
     </g>`;
@@ -1436,6 +1705,14 @@ function getAssetValueAt(currency, cutoff, mode = "net") {
 }
 
 function renderCategoryShare(rows, total, currency) {
+  renderCategoryDonut("categoryDonut", "categoryShare", rows, total, currency, "本期还没有支出");
+}
+
+function renderIncomeShare(rows, total, currency) {
+  renderCategoryDonut("incomeDonut", "incomeShare", rows, total, currency, "本期还没有收入");
+}
+
+function renderCategoryDonut(donutId, listId, rows, total, currency, emptyText) {
   let cursor = 0;
   const segments = rows
     .map((row) => {
@@ -1445,17 +1722,247 @@ function renderCategoryShare(rows, total, currency) {
       return `${row.category.color} ${start}% ${end}%`;
     })
     .join(", ");
-  document.querySelector("#categoryDonut").style.background = segments ? `conic-gradient(${segments})` : "#eee8de";
+  document.querySelector(`#${donutId}`).style.background = segments ? `conic-gradient(${segments})` : "#eee8de";
   renderList(
-    "categoryShare",
+    listId,
     rows,
     (row) => `<div class="rank-item">
       ${categoryBadge(row.category)}
       <div class="item-main"><strong>${row.category.name}</strong><span>${Math.round((row.amount / Math.max(total, 1)) * 100)}%</span></div>
       <strong>${money(row.amount, currency)}</strong>
     </div>`,
-    "本月还没有支出"
+    emptyText
   );
+}
+
+function renderStatsFilters() {
+  const categories = state.categories
+    .filter((category) => category.enabled !== false && category.archived !== true)
+    .sort((a, b) => a.type.localeCompare(b.type) || Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+  document.querySelectorAll("[data-stats-category-filters]").forEach((target) => {
+    const type = target.dataset.statsCategoryFilters;
+    const rows = categories.filter((category) => !type || category.type === type);
+    target.innerHTML = rows.map((category) => `
+      <label class="stats-filter-option">
+        <input type="checkbox" value="${category.id}" data-stats-filter-category ${statsExcludedCategories.has(category.id) ? "checked" : ""} />
+        ${categoryBadge(category)}
+        <span>${escapeHtml(category.name)}</span>
+      </label>`).join("") || `<div class="empty-inline">还没有可筛选分类</div>`;
+  });
+  const tagRows = [...statsExcludedTags].sort();
+  const tagMarkup = tagRows.length
+    ? tagRows.map((tag) => `<button class="stats-filter-tag" type="button" data-remove-stats-tag="${escapeHtml(tag)}">${escapeHtml(tag)} ×</button>`).join("")
+    : `<span class="empty-inline">还没有排除标签</span>`;
+  document.querySelectorAll("[data-stats-tag-filters]").forEach((target) => {
+    target.innerHTML = tagMarkup;
+  });
+}
+
+function addStatsTagFilter(input) {
+  if (!input) return;
+  const tag = input.value.trim();
+  if (!tag) return;
+  statsExcludedTags.add(tag);
+  document.querySelectorAll("[data-stats-tag-filter-input]").forEach((field) => {
+    field.value = "";
+  });
+  renderStats();
+}
+
+function filterStatsTransactions(transactions) {
+  return transactions.filter((item) => passesStatsFilters(item));
+}
+
+function passesStatsFilters(item) {
+  if (statsExcludedCategories.has(item.categoryId)) return false;
+  const tags = Array.isArray(item.tags) ? item.tags.map((tag) => String(tag).trim()).filter(Boolean) : [];
+  return !tags.some((tag) => statsExcludedTags.has(tag));
+}
+
+function renderSpendingAnalysis(transactions, categoryTotals, totalExpense, currency) {
+  const expenses = transactions.filter((item) => item.type === "expense");
+  const topCategories = categoryTotals.slice(0, 5);
+  const topNames = topCategories.slice(0, 3).map((row) => row.category.name);
+  const insight = topCategories.length
+    ? `本期支出主要流向${topNames.join("、")}，其中${topCategories[0].category.name}占 ${Math.round((topCategories[0].amount / Math.max(totalExpense, 1)) * 100)}%。`
+    : "本期还没有足够的支出数据";
+  setText("spendingInsight", insight);
+  const tagRows = getTagTotalsByType(expenses, currency).slice(0, 6);
+  const fixedRows = getFixedExpenseRows(expenses, currency).slice(0, 6);
+  const fixedTotal = fixedRows.reduce((sum, row) => sum + row.amount, 0);
+  setText("expenseAnalysisTotal", money(totalExpense, currency));
+  setText("expenseAnalysisTopCategory", topCategories[0]?.category.name || "-");
+  setText("expenseAnalysisFixed", money(fixedTotal, currency));
+  setText("expenseAnalysisTags", `${expenses.length} 笔`);
+
+  renderList(
+    "spendingFlowList",
+    topCategories,
+    (row) => renderFlowRow({
+      marker: categoryBadge(row.category),
+      title: row.category.name,
+      meta: `${Math.round((row.amount / Math.max(totalExpense, 1)) * 100)}% · ${row.currency}`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalExpense,
+    }),
+    "本期还没有支出"
+  );
+
+  renderList(
+    "tagFlowList",
+    tagRows,
+    (row) => renderFlowRow({
+      marker: `<span class="flow-tag-marker">#</span>`,
+      title: row.tag,
+      meta: `${row.count} 笔 · ${Math.round((row.amount / Math.max(totalExpense, 1)) * 100)}%`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalExpense,
+    }),
+    "本期还没有标签支出"
+  );
+
+  renderList(
+    "fixedExpenseList",
+    fixedRows,
+    (row) => renderFlowRow({
+      marker: categoryBadge(row.category),
+      title: row.title,
+      meta: `${row.count} 笔 · ${row.category?.name || "其他"}`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalExpense,
+    }),
+    "本期暂未识别到固定支出"
+  );
+}
+
+function renderFlowRow({ marker, title, meta, amount, value, total }) {
+  const percent = Math.min(100, Math.max(4, (value / Math.max(total, 1)) * 100));
+  return `<div class="flow-item">
+    ${marker}
+    <div class="flow-main">
+      <div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(meta)}</span></div>
+      <i style="--flow-width:${percent}%"></i>
+    </div>
+    <strong>${amount}</strong>
+  </div>`;
+}
+
+function getFixedExpenseRows(expenses, currency) {
+  const fixedCategoryIds = new Set(["housing", "utilities"]);
+  const fixedKeywords = ["固定", "房租", "租金", "水电", "通讯", "手机费", "宽带", "订阅", "会员", "通勤", "月卡"];
+  const map = new Map();
+  expenses.forEach((item) => {
+    const category = findCategory(item.categoryId);
+    const text = `${item.note || ""} ${(Array.isArray(item.tags) ? item.tags : []).join(" ")}`;
+    const hasFixedKeyword = fixedKeywords.some((keyword) => text.includes(keyword));
+    const isFixed = fixedCategoryIds.has(item.categoryId) || hasFixedKeyword;
+    if (!isFixed) return;
+    const title = category?.name || item.note || "固定支出";
+    const key = category?.id || item.note || "fixed";
+    const current = map.get(key) || { title, category, amount: 0, count: 0, currency };
+    current.amount += item.amount;
+    current.count += 1;
+    map.set(key, current);
+  });
+  return [...map.values()].sort((a, b) => b.amount - a.amount || b.count - a.count);
+}
+
+function renderIncomeAnalysis(transactions, incomeTotals, totalIncome, currency) {
+  const incomes = transactions.filter((item) => item.type === "income");
+  const topCategories = incomeTotals.slice(0, 5);
+  const topNames = topCategories.slice(0, 3).map((row) => row.category.name);
+  const insight = topCategories.length
+    ? `本期收入主要来自${topNames.join("、")}，其中${topCategories[0].category.name}占 ${Math.round((topCategories[0].amount / Math.max(totalIncome, 1)) * 100)}%。`
+    : "本期还没有足够的收入数据";
+  setText("incomeInsight", insight);
+  const tagRows = getTagTotalsByType(incomes, currency).slice(0, 6);
+  const stableRows = getStableIncomeRows(incomes, currency).slice(0, 6);
+  const stableTotal = stableRows.reduce((sum, row) => sum + row.amount, 0);
+  setText("incomeAnalysisTotal", money(totalIncome, currency));
+  setText("incomeAnalysisTopCategory", topCategories[0]?.category.name || "-");
+  setText("incomeAnalysisStable", money(stableTotal, currency));
+  setText("incomeAnalysisCount", `${incomes.length} 笔`);
+
+  renderList(
+    "incomeFlowList",
+    topCategories,
+    (row) => renderFlowRow({
+      marker: categoryBadge(row.category),
+      title: row.category.name,
+      meta: `${Math.round((row.amount / Math.max(totalIncome, 1)) * 100)}% · ${row.currency}`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalIncome,
+    }),
+    "本期还没有收入"
+  );
+
+  renderList(
+    "incomeTagFlowList",
+    tagRows,
+    (row) => renderFlowRow({
+      marker: `<span class="flow-tag-marker">#</span>`,
+      title: row.tag,
+      meta: `${row.count} 笔 · ${Math.round((row.amount / Math.max(totalIncome, 1)) * 100)}%`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalIncome,
+    }),
+    "本期还没有收入标签"
+  );
+
+  renderList(
+    "stableIncomeList",
+    stableRows,
+    (row) => renderFlowRow({
+      marker: categoryBadge(row.category, "income"),
+      title: row.title,
+      meta: `${row.count} 笔 · ${row.category?.name || "其他"}`,
+      amount: money(row.amount, currency),
+      value: row.amount,
+      total: totalIncome,
+    }),
+    "本期暂未识别到稳定收入"
+  );
+}
+
+function getTagTotalsByType(items, currency) {
+  const map = new Map();
+  items.forEach((item) => {
+    (Array.isArray(item.tags) ? item.tags : []).forEach((tag) => {
+      const name = String(tag || "").trim();
+      if (!name) return;
+      const current = map.get(name) || { tag: name, amount: 0, count: 0 };
+      current.amount += item.amount;
+      current.count += 1;
+      map.set(name, current);
+    });
+  });
+  return [...map.values()]
+    .map((row) => ({ ...row, currency }))
+    .sort((a, b) => b.amount - a.amount || b.count - a.count);
+}
+
+function getStableIncomeRows(incomes, currency) {
+  const stableCategoryIds = new Set(["salary", "side", "investment"]);
+  const stableKeywords = ["固定收入", "工资", "薪资", "月薪", "副业", "分红", "利息", "稳定"];
+  const map = new Map();
+  incomes.forEach((item) => {
+    const category = findCategory(item.categoryId);
+    const text = `${item.note || ""} ${(Array.isArray(item.tags) ? item.tags : []).join(" ")}`;
+    const isStable = stableCategoryIds.has(item.categoryId) || stableKeywords.some((keyword) => text.includes(keyword));
+    if (!isStable) return;
+    const title = category?.name || item.note || "稳定收入";
+    const key = category?.id || item.note || "stable-income";
+    const current = map.get(key) || { title, category, amount: 0, count: 0, currency };
+    current.amount += item.amount;
+    current.count += 1;
+    map.set(key, current);
+  });
+  return [...map.values()].sort((a, b) => b.amount - a.amount || b.count - a.count);
 }
 
 function saveTransaction(event) {
@@ -1515,6 +2022,11 @@ function saveTransaction(event) {
       installmentPurchaseDate: existingTransaction.installmentPurchaseDate || existingTransaction.createdAt || existingTransaction.date,
     } : {}),
   };
+  const balanceError = validateNonCreditBalancesAfterTransaction(transaction);
+  if (balanceError) {
+    toast(balanceError);
+    return;
+  }
   upsertTransaction(transaction);
   resetTransactionForm();
   form.amount.focus();
@@ -1590,7 +2102,8 @@ function saveQuickTransaction(event) {
   const form = el.quickForm;
   const amount = Number(form.amount.value);
   const currency = resolveAccountCurrency(form.accountId.value, form.currency.value);
-  addQuickExpense(amount, form.categoryId.value, form.note.value.trim(), form.accountId.value, currency);
+  const saved = addQuickExpense(amount, form.categoryId.value, form.note.value.trim(), form.accountId.value, currency);
+  if (!saved) return;
   form.reset();
   fillSelects();
   toast(`已记录 ${money(amount, currency)}`);
@@ -1601,7 +2114,7 @@ function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId(
   const timestamp = now.toISOString();
   const resolvedAccountId = findAccount(accountId) ? accountId : defaultAccountId();
   const resolvedCurrency = resolveAccountCurrency(resolvedAccountId, currency);
-  upsertTransaction({
+  const transaction = {
     id: crypto.randomUUID(),
     type: "expense",
     amount,
@@ -1616,7 +2129,14 @@ function addQuickExpense(amount, categoryId, note, accountId = defaultAccountId(
     tags: [],
     createdAt: timestamp,
     updatedAt: timestamp,
-  });
+  };
+  const balanceError = validateNonCreditBalancesAfterTransaction(transaction);
+  if (balanceError) {
+    toast(balanceError);
+    return false;
+  }
+  upsertTransaction(transaction);
+  return true;
 }
 
 function saveAccount(event) {
@@ -1627,6 +2147,10 @@ function saveAccount(event) {
   const enteredBalances = readAccountBalanceRows(isCreditCard);
   if (!enteredBalances.length) {
     toast("请至少保留一个币种余额");
+    return;
+  }
+  if (!isCreditCard && enteredBalances.some((balance) => Number(balance.initialBalance) < 0)) {
+    toast("普通钱包余额不能为负数");
     return;
   }
   const duplicate = state.accounts.some(
@@ -1682,6 +2206,10 @@ function saveAccount(event) {
   }
   if (hasTransactions && existingAccount.type !== account.type && [existingAccount.type, account.type].includes("credit_card")) {
     toast("已有账单的钱包不能切换为信用卡类型");
+    return;
+  }
+  if (!isCreditCard && balances.some((balance) => getProjectedAccountBalance(account, balance.currency) < -0.005)) {
+    toast("普通钱包余额不能为负数");
     return;
   }
   if (index >= 0) state.accounts[index] = account;
@@ -1766,6 +2294,36 @@ function upsertTransaction(transaction) {
   renderAll();
 }
 
+function validateNonCreditBalancesAfterTransaction(transaction) {
+  const existing = findTransaction(transaction.id);
+  const nextAffectedIds = transaction.type === "transfer"
+    ? [transaction.accountId, transaction.targetAccountId]
+    : [transaction.accountId];
+  const previousAffectedIds = existing
+    ? existing.type === "transfer"
+      ? [existing.accountId, existing.targetAccountId]
+      : [existing.accountId]
+    : [];
+  const affectedIds = [...new Set([...nextAffectedIds, ...previousAffectedIds].filter(Boolean))];
+  const transactions = [
+    transaction,
+    ...state.transactions.filter((item) => item.id !== transaction.id),
+  ];
+  const currencies = new Set([transactionCurrency(transaction), existing ? transactionCurrency(existing) : ""]);
+  for (const accountId of affectedIds) {
+    const account = findAccount(accountId);
+    if (!account || account.type === "credit_card") continue;
+    for (const currency of currencies) {
+      if (!currency || !accountCurrencies(account).includes(currency)) continue;
+      const balance = getProjectedAccountBalance(account, currency, transactions);
+      if (balance < -0.005) {
+        return `${account.name} 的 ${currency} 余额不能为负数`;
+      }
+    }
+  }
+  return "";
+}
+
 function editTransaction(id) {
   const item = findTransaction(id);
   if (!item) return;
@@ -1788,14 +2346,14 @@ function editTransaction(id) {
   form.currency.value = transactionCurrency(item);
   form.targetAccountId.value = item.targetAccountId || "";
   form.date.value = toTransactionDateTimeInput(item);
+  renderPeriodCascade(form.date, "datetime", form.date.value);
   form.tags.value = item.tags.join(", ");
   form.note.value = item.note;
   updateInstallmentFields();
-  updateCreditBillPeriodField();
   form.creditBillMonth.value = item.creditBillAccountId === creditReceivingAccount()?.id
     ? item.creditBillMonth || ""
     : "";
-  syncSelectDisplay(form.creditBillMonth);
+  updateCreditBillPeriodField();
   setTransactionFormMode(true);
   switchView("add");
   if (item.type !== "transfer" && !categoryIsCurrent) toast("原分类已删除或停用，请选择当前分类");
@@ -2041,6 +2599,8 @@ function resetTransactionForm() {
   el.transactionForm.installmentCount.value = "3";
   el.transactionForm.accountId.value = defaultAccountId();
   el.transactionForm.creditBillMonth.value = "";
+  renderPeriodCascade(el.transactionForm.date, "datetime", el.transactionForm.date.value);
+  renderPeriodCascade(el.transactionForm.installmentStartDate, "date", el.transactionForm.installmentStartDate.value);
   fillTransactionCurrencySelect();
   selectedType = "expense";
   setType("expense");
@@ -2067,12 +2627,14 @@ function updateInstallmentFields() {
   form.installmentCount.disabled = !(enabled && form.useInstallment.checked);
   form.installmentStartDate.disabled = !(enabled && form.useInstallment.checked);
   if (!form.installmentStartDate.value) form.installmentStartDate.value = form.date.value ? form.date.value.slice(0, 10) : toDateInput(new Date());
+  renderPeriodCascade(form.installmentStartDate, "date", form.installmentStartDate.value);
 }
 
 function syncInstallmentStartDate() {
   el.transactionForm.installmentStartDate.value = el.transactionForm.date.value
     ? el.transactionForm.date.value.slice(0, 10)
     : toDateInput(new Date());
+  renderPeriodCascade(el.transactionForm.installmentStartDate, "date", el.transactionForm.installmentStartDate.value);
 }
 
 function creditReceivingAccount() {
@@ -2104,13 +2666,12 @@ function updateCreditBillPeriodField() {
 
   const selected = form.creditBillMonth.value;
   const automaticMonth = creditBillMonthForDate(account, form.date.value || new Date());
-  const months = Array.from({ length: 25 }, (_, index) => addMonths(automaticMonth, index - 12));
-  form.creditBillMonth.innerHTML = [
-    `<option value="">自动归入（${formatMonthLabel(automaticMonth)}账单）</option>`,
-    ...months.map((month) => `<option value="${month}">${formatMonthLabel(month)}账单</option>`),
-  ].join("");
-  form.creditBillMonth.value = months.includes(selected) ? selected : "";
-  syncSelectDisplay(form.creditBillMonth);
+  renderPeriodCascade(
+    form.creditBillMonth,
+    "month",
+    /^\d{4}-\d{2}$/.test(selected) ? selected : "",
+    { allowAuto: true, autoLabel: `自动归入（${formatMonthLabel(automaticMonth)}账单）` }
+  );
 }
 
 function resetAccountForm() {
@@ -2173,7 +2734,7 @@ function accountBalanceRowTemplate(balance, isCreditCard) {
     <select name="balanceCurrency" aria-label="币种">
       ${supportedCurrencies.map((currency) => `<option value="${currency}" ${currency === balance.currency ? "selected" : ""}>${currencyNames[currency] || currency} ${currency}</option>`).join("")}
     </select>
-    <input name="balanceAmount" type="number" step="0.01" value="${amount}" aria-label="${isCreditCard ? "当前欠款" : "当前余额"}" />
+    <input name="balanceAmount" type="number" step="0.01" min="0" value="${amount}" aria-label="${isCreditCard ? "当前欠款" : "当前余额"}" />
     <button class="icon-button danger-button" type="button" onclick="removeAccountBalanceRow(this)" title="删除币种" aria-label="删除币种"><span class="action-icon trash-icon" aria-hidden="true"></span></button>
   </div>`;
 }
@@ -2208,8 +2769,7 @@ function readAccountBalanceRows(isCreditCard) {
 
 function normalizeBalanceRowSigns(isCreditCard) {
   document.querySelectorAll("#accountBalanceRows [name='balanceAmount']").forEach((input) => {
-    if (isCreditCard) input.min = "0";
-    else input.removeAttribute("min");
+    input.min = "0";
     input.value = isCreditCard ? Math.abs(Number(input.value || 0)) : Number(input.value || 0);
   });
 }
@@ -2651,11 +3211,28 @@ function renderAccountItem({ account, balances, index, total }) {
   const availableCredit = isCreditCard ? Math.max(0, Number(account.creditLimit || 0) - outstanding) : 0;
   const logo = accountLogoMarkup(account);
   const detail = isCreditCard
-    ? `${meta.label} · ${accountCurrencies(account).join("/")} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`
-    : `${meta.label} · ${accountCurrencies(account).join("/")} · ${account.includeInAssets ? "计入资产统计" : "未计入资产统计"}`;
-  const balanceMarkup = isCreditCard
-    ? `<div class="account-balance-block">${balances.map(({ currency, value }) => `<span>待还款 ${currency}</span><strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(Math.max(0, -value), currency)}</strong>`).join("")}</div>`
-    : `<div class="account-balance-list">${balances.map(({ currency, value }) => `<strong class="account-balance ${value < 0 ? "is-negative" : ""}">${money(value, currency)}</strong>`).join("")}</div>`;
+    ? `${meta.label} · 主币种 ${primaryBalance.currency} · 账单日 ${account.billingDay} 日 · 还款日 ${account.dueDay} 日 · 可用 ${money(availableCredit, primaryBalance.currency)}`
+    : `${meta.label} · 主币种 ${primaryBalance.currency} · ${account.includeInAssets ? "计入资产统计" : "未计入资产统计"}`;
+  const displayBalance = ({ currency, value }) => isCreditCard
+    ? money(Math.max(0, -value), currency)
+    : money(value, currency);
+  const balanceRows = balances.map(({ currency, value }) => `<div class="account-currency-row">
+    <span><b>${currency}</b>${escapeHtml(currencyNames[currency] || currency)}</span>
+    <strong class="${value < 0 ? "is-negative" : ""}">${displayBalance({ currency, value })}</strong>
+  </div>`).join("");
+  const balanceDetails = balances.length > 1
+    ? `<details class="account-currency-details">
+        <summary><span>共 ${balances.length} 种货币</span><span class="account-currency-chevron" aria-hidden="true"></span></summary>
+        <div class="account-currency-breakdown" aria-label="${escapeHtml(account.name)}币种余额明细">${balanceRows}</div>
+      </details>`
+    : `<span class="account-single-currency">${escapeHtml(currencyNames[primaryBalance.currency] || primaryBalance.currency)}</span>`;
+  const balanceMarkup = `<div class="account-balance-summary">
+    <div class="account-primary-balance">
+      <span>${isCreditCard ? "待还款" : primaryBalance.currency}</span>
+      <strong class="account-balance ${primaryBalance.value < 0 ? "is-negative" : ""}">${displayBalance(primaryBalance)}</strong>
+    </div>
+    ${balanceDetails}
+  </div>`;
   return `<div class="account-item" ondragover="allowAccountDrop(event)" ondragleave="leaveAccountDrop(event)" ondrop="dropAccount(event, '${account.id}')">
     ${logo}
     <div class="item-main">
@@ -2830,9 +3407,17 @@ function getCreditBillPeriod(account, month) {
 }
 
 function getCategoryExpenseTotals(transactions, selectedCurrency = null) {
+  return getCategoryTotalsByType(transactions, "expense", selectedCurrency);
+}
+
+function getCategoryIncomeTotals(transactions, selectedCurrency = null) {
+  return getCategoryTotalsByType(transactions, "income", selectedCurrency);
+}
+
+function getCategoryTotalsByType(transactions, type, selectedCurrency = null) {
   const map = new Map();
   transactions
-    .filter((item) => item.type === "expense")
+    .filter((item) => item.type === type)
     .filter((item) => !selectedCurrency || transactionCurrency(item) === selectedCurrency)
     .forEach((item) => {
       const currency = transactionCurrency(item);
@@ -2912,12 +3497,18 @@ function getAccountBalance(id) {
 function getAccountBalanceByCurrency(id, currency) {
   const account = findAccount(id);
   if (!account) return 0;
-  const balance = accountBalances(id).find((item) => item.currency === currency);
-  return Number(balance?.initialBalance || 0) + getAccountTransactionImpactByCurrency(id, currency);
+  return getProjectedAccountBalance(account, currency);
 }
 
-function getAccountTransactionImpactByCurrency(id, currency) {
-  return state.transactions.reduce((balance, item) => {
+function getProjectedAccountBalance(accountOrId, currency, transactions = state.transactions) {
+  const account = typeof accountOrId === "string" ? findAccount(accountOrId) : accountOrId;
+  if (!account) return 0;
+  const balance = accountBalances(account).find((item) => item.currency === currency);
+  return Number(balance?.initialBalance || 0) + getAccountTransactionImpactByCurrency(account.id, currency, transactions);
+}
+
+function getAccountTransactionImpactByCurrency(id, currency, transactions = state.transactions) {
+  return transactions.reduce((balance, item) => {
     if (!isBalanceRecognizedBefore(item)) return balance;
     if (transactionCurrency(item) !== currency) return balance;
     if (item.type === "expense" && item.accountId === id) return balance - item.amount;
@@ -3029,23 +3620,57 @@ function sortedCurrencyEntries(totals) {
 function renderAssetTotals(totals) {
   const entries = sortedCurrencyEntries(totals);
   const rows = entries.length ? entries : [["CNY", 0]];
-  document.querySelector("#totalAssets").innerHTML = rows
-    .map(([currency, value], index) => `<div class="asset-total-item ${index === 0 ? "is-primary" : ""}">
-      <span>${currencyNames[currency] || currency} <b>${currency}</b></span>
-      <strong>${money(value, currency)}</strong>
-    </div>`)
-    .join("");
+  const [primaryCurrency, primaryValue] = rows[0];
+  const secondaryRows = rows.slice(1);
+  const secondaryMarkup = secondaryRows.length
+    ? `<div class="asset-secondary-grid">
+        ${secondaryRows.map(([currency, value]) => `<div class="asset-secondary-pill">
+          <span>${currencyNames[currency] || currency}</span>
+          <b>${currency}</b>
+          <strong>${money(value, currency)}</strong>
+        </div>`).join("")}
+      </div>`
+    : `<div class="asset-secondary-empty">暂无其他币种</div>`;
+  document.querySelector("#totalAssets").innerHTML = `
+    <div class="asset-total-primary">
+      <span>${currencyNames[primaryCurrency] || primaryCurrency} <b>${primaryCurrency}</b></span>
+      <strong>${money(primaryValue, primaryCurrency)}</strong>
+    </div>
+    <details class="asset-secondary-details" open>
+      <summary>
+        <span>其他币种</span>
+        <b>${secondaryRows.length ? `${secondaryRows.length} 种` : "无"}</b>
+      </summary>
+      ${secondaryMarkup}
+    </details>`;
 }
 
 function renderDashboardAssetTotals(totals) {
   const entries = sortedCurrencyEntries(totals);
   const rows = entries.length ? entries : [["CNY", 0]];
-  document.querySelector("#dashboardNetAssets").innerHTML = rows
-    .map(([currency, value], index) => `<div class="metric-currency-item ${index === 0 ? "is-primary" : ""}">
-      <span>${currency}</span>
-      <strong>${money(value, currency)}</strong>
-    </div>`)
-    .join("");
+  const [primaryCurrency, primaryValue] = rows[0];
+  const secondaryRows = rows.slice(1);
+  const secondaryMarkup = secondaryRows.length
+    ? `<div class="asset-secondary-grid">
+        ${secondaryRows.map(([currency, value]) => `<div class="asset-secondary-pill">
+          <span>${currencyNames[currency] || currency}</span>
+          <b>${currency}</b>
+          <strong>${money(value, currency)}</strong>
+        </div>`).join("")}
+      </div>`
+    : `<div class="asset-secondary-empty">暂无其他币种</div>`;
+  document.querySelector("#dashboardNetAssets").innerHTML = `
+    <div class="asset-total-primary">
+      <span>${currencyNames[primaryCurrency] || primaryCurrency} <b>${primaryCurrency}</b></span>
+      <strong>${money(primaryValue, primaryCurrency)}</strong>
+    </div>
+    <details class="asset-secondary-details" open>
+      <summary>
+        <span>其他币种</span>
+        <b>${secondaryRows.length ? `${secondaryRows.length} 种` : "无"}</b>
+      </summary>
+      ${secondaryMarkup}
+    </details>`;
 }
 
 function currencyForAccount(id) {

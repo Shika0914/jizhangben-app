@@ -7,7 +7,7 @@
     <meta name="application-version" content="3.1" />
     <title>记账本 - 个人记账</title>
     <link id="appFavicon" rel="icon" href="./assets/icons/app-logo.svg?v=3" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=beauty-32" />
+    <link rel="stylesheet" href="./styles.css?v=beauty-59" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,7 +60,8 @@
           </div>
           <div class="month-control">
             <label for="monthPicker">月份</label>
-            <input id="monthPicker" type="month" />
+            <input id="monthPicker" type="hidden" />
+            <div class="period-cascade" data-period-target="monthPicker" data-period-kind="month" aria-label="选择账本月份"></div>
           </div>
         </header>
 
@@ -96,6 +97,7 @@
               <div class="metric-currency-list" id="dashboardNetAssets" aria-live="polite"></div>
             </div>
             <button class="link-button" data-view-jump="assets" type="button">查看资产</button>
+            <p id="dashboardAssetSummary">已扣除负余额 · 共 0 个钱包</p>
           </section>
 
           <div class="content-grid">
@@ -240,13 +242,13 @@
               </label>
               <label>
                 日期
-                <input name="date" type="datetime-local" required />
+                <input id="transactionDate" name="date" type="hidden" required />
+                <div class="period-cascade period-cascade-datetime" data-period-target="transactionDate" data-period-kind="datetime" aria-label="选择交易日期和时间"></div>
               </label>
               <label class="credit-bill-period-field" hidden>
                 信用卡账期
-                <select name="creditBillMonth">
-                  <option value="">按交易日期自动归期</option>
-                </select>
+                <input id="transactionCreditBillMonth" name="creditBillMonth" type="hidden" />
+                <div class="period-cascade" data-period-target="transactionCreditBillMonth" data-period-kind="month"></div>
               </label>
               <label>
                 标签
@@ -267,7 +269,8 @@
                 </label>
                 <label>
                   首期日期
-                  <input name="installmentStartDate" type="date" />
+                  <input id="installmentStartDate" name="installmentStartDate" type="hidden" />
+                  <div class="period-cascade period-cascade-date" data-period-target="installmentStartDate" data-period-kind="date" aria-label="选择首期日期"></div>
                 </label>
               </div>
             </div>
@@ -356,7 +359,8 @@
                   </div>
                   <label class="credit-period-picker">
                     账单期
-                    <input id="creditBillMonth" type="month" />
+                    <input id="creditBillMonth" type="hidden" />
+                    <div class="period-cascade" data-period-target="creditBillMonth" data-period-kind="month" aria-label="选择信用卡账单期"></div>
                   </label>
                 </div>
                 <div class="bill-list" id="creditBillList"></div>
@@ -442,15 +446,18 @@
             <div class="stats-period-controls">
               <label class="stats-period-field" data-stats-period="week" hidden>
                 <span>所在周</span>
-                <input class="stats-date-control" id="statsWeekDate" type="date" />
+                <input id="statsWeekDate" type="hidden" />
+                <div class="period-cascade period-cascade-date" data-period-target="statsWeekDate" data-period-kind="date" aria-label="选择周报日期"></div>
               </label>
               <label class="stats-period-field" data-stats-period="month">
                 <span>月份</span>
-                <input class="stats-date-control" id="statsMonthValue" type="month" />
+                <input id="statsMonthValue" type="hidden" />
+                <div class="period-cascade" data-period-target="statsMonthValue" data-period-kind="month" aria-label="选择月报月份"></div>
               </label>
               <label class="stats-period-field" data-stats-period="year" hidden>
                 <span>年份</span>
-                <select class="stats-date-control" id="statsYearValue" aria-label="选择年报年份"></select>
+                <input id="statsYearValue" type="hidden" />
+                <div class="period-cascade period-cascade-year" data-period-target="statsYearValue" data-period-kind="year" aria-label="选择年报年份"></div>
               </label>
               <label class="stats-currency-field" for="statsCurrency">
                 <span>统计币种</span>
@@ -459,44 +466,50 @@
             </div>
             <p class="stats-period-summary" id="statsPeriodSummary"></p>
           </div>
-          <div class="metric-grid">
-            <article class="metric">
-              <span>储蓄率</span>
-              <strong id="savingRate">0%</strong>
-            </article>
-            <article class="metric">
-              <span>最大支出分类</span>
-              <strong id="largestCategory">-</strong>
-            </article>
-            <article class="metric">
-              <span>最大单笔消费</span>
-              <strong id="largestExpense">¥0</strong>
-            </article>
-            <article class="metric">
-              <span id="statsDeltaLabel">比上月变化</span>
-              <strong id="monthDelta">¥0</strong>
-            </article>
+          <div class="stats-subnav" role="tablist" aria-label="统计分析">
+            <button class="stats-subnav-button active" type="button" data-stats-page="overview" aria-pressed="true">概览</button>
+            <button class="stats-subnav-button" type="button" data-stats-page="expense" aria-pressed="false">消费分析</button>
+            <button class="stats-subnav-button" type="button" data-stats-page="income" aria-pressed="false">收入分析</button>
           </div>
-          <section class="panel stats-net-panel">
-            <div class="panel-heading stats-chart-heading">
-              <div>
-                <h2 id="statsAssetTrendTitle">净资产趋势</h2>
-                <p id="statsAssetTrendDescription">包含所选币种钱包的正负余额</p>
-              </div>
-              <div class="stats-asset-actions">
-                <div class="asset-value-switch" role="group" aria-label="趋势图资产口径">
-                  <button class="asset-value-button" type="button" data-stats-asset-mode="total" aria-pressed="false">总资产</button>
-                  <button class="asset-value-button active" type="button" data-stats-asset-mode="net" aria-pressed="true">净资产</button>
-                </div>
-                <div class="stats-chart-legend">
-                  <span><i class="legend-dot net"></i><span id="statsAssetEndLabel">期末净资产</span> <strong id="statsNetAssetCurrent">¥0</strong></span>
-                  <span>周期变化 <strong id="statsNetAssetChange">¥0</strong></span>
-                </div>
-              </div>
+
+          <div class="stats-page active" data-stats-page-panel="overview">
+            <div class="metric-grid">
+              <article class="metric">
+                <span>储蓄率</span>
+                <strong id="savingRate">0%</strong>
+              </article>
+              <article class="metric">
+                <span>最大支出分类</span>
+                <strong id="largestCategory">-</strong>
+              </article>
+              <article class="metric">
+                <span>最大单笔消费</span>
+                <strong id="largestExpense">¥0</strong>
+              </article>
+              <article class="metric">
+                <span id="statsDeltaLabel">比上月变化</span>
+                <strong id="monthDelta">¥0</strong>
+              </article>
             </div>
-            <div class="net-worth-chart" id="netWorthChart"></div>
-          </section>
-          <div class="content-grid">
+            <section class="panel stats-net-panel">
+              <div class="panel-heading stats-chart-heading">
+                <div>
+                  <h2 id="statsAssetTrendTitle">净资产趋势</h2>
+                  <p id="statsAssetTrendDescription">包含所选币种钱包的正负余额</p>
+                </div>
+                <div class="stats-asset-actions">
+                  <div class="asset-value-switch" role="group" aria-label="趋势图资产口径">
+                    <button class="asset-value-button" type="button" data-stats-asset-mode="total" aria-pressed="false">总资产</button>
+                    <button class="asset-value-button active" type="button" data-stats-asset-mode="net" aria-pressed="true">净资产</button>
+                  </div>
+                  <div class="stats-chart-legend">
+                    <span><i class="legend-dot net"></i><span id="statsAssetEndLabel">期末净资产</span> <strong id="statsNetAssetCurrent">¥0</strong></span>
+                    <span>周期变化 <strong id="statsNetAssetChange">¥0</strong></span>
+                  </div>
+                </div>
+              </div>
+              <div class="net-worth-chart" id="netWorthChart"></div>
+            </section>
             <section class="panel">
               <div class="panel-heading stats-chart-heading">
                 <h2 id="statsTrendTitle">本月每日收支</h2>
@@ -507,13 +520,146 @@
               </div>
               <div class="cashflow-chart" id="dailyChart"></div>
             </section>
+          </div>
+
+          <div class="stats-page" data-stats-page-panel="expense" hidden>
+            <details class="stats-inline-filter">
+              <summary>筛选统计数据</summary>
+              <div class="stats-filter-grid">
+                <section>
+                  <h3>排除分类</h3>
+                  <div class="stats-filter-list" data-stats-category-filters="expense"></div>
+                </section>
+                <section>
+                  <h3>排除标签</h3>
+                  <div class="stats-tag-filter-row">
+                    <input data-stats-tag-filter-input type="text" placeholder="输入标签后回车" />
+                    <button class="secondary-button" data-add-stats-tag-filter type="button">添加</button>
+                  </div>
+                  <div class="stats-filter-tags" data-stats-tag-filters></div>
+                </section>
+              </div>
+              <button class="secondary-button stats-filter-reset" data-reset-stats-filters type="button">清空筛选</button>
+            </details>
+            <div class="metric-grid analysis-metric-grid">
+              <article class="metric">
+                <span>本期支出</span>
+                <strong id="expenseAnalysisTotal">¥0</strong>
+              </article>
+              <article class="metric">
+                <span>最大支出分类</span>
+                <strong id="expenseAnalysisTopCategory">-</strong>
+              </article>
+              <article class="metric">
+                <span>固定支出</span>
+                <strong id="expenseAnalysisFixed">¥0</strong>
+              </article>
+              <article class="metric">
+                <span>支出笔数</span>
+                <strong id="expenseAnalysisTags">0 笔</strong>
+              </article>
+            </div>
             <section class="panel">
               <div class="panel-heading">
-                <h2>分类占比</h2>
+                <h2>支出分类占比</h2>
               </div>
               <div class="donut-area">
                 <div class="donut" id="categoryDonut"></div>
                 <div class="rank-list" id="categoryShare"></div>
+              </div>
+            </section>
+            <section class="panel spending-analysis-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>消费分析</h2>
+                  <span class="panel-note">从分类、标签和固定支出查看资金流向</span>
+                </div>
+              </div>
+              <div class="spending-insight" id="spendingInsight">本期还没有足够的支出数据</div>
+              <div class="spending-analysis-grid">
+                <section class="spending-analysis-card">
+                  <h3>支出流向</h3>
+                  <div class="flow-list" id="spendingFlowList"></div>
+                </section>
+                <section class="spending-analysis-card">
+                  <h3>标签排行</h3>
+                  <div class="flow-list" id="tagFlowList"></div>
+                </section>
+                <section class="spending-analysis-card">
+                  <h3>固定支出</h3>
+                  <div class="flow-list" id="fixedExpenseList"></div>
+                </section>
+              </div>
+            </section>
+          </div>
+
+          <div class="stats-page" data-stats-page-panel="income" hidden>
+            <details class="stats-inline-filter">
+              <summary>筛选统计数据</summary>
+              <div class="stats-filter-grid">
+                <section>
+                  <h3>排除分类</h3>
+                  <div class="stats-filter-list" data-stats-category-filters="income"></div>
+                </section>
+                <section>
+                  <h3>排除标签</h3>
+                  <div class="stats-tag-filter-row">
+                    <input data-stats-tag-filter-input type="text" placeholder="输入标签后回车" />
+                    <button class="secondary-button" data-add-stats-tag-filter type="button">添加</button>
+                  </div>
+                  <div class="stats-filter-tags" data-stats-tag-filters></div>
+                </section>
+              </div>
+              <button class="secondary-button stats-filter-reset" data-reset-stats-filters type="button">清空筛选</button>
+            </details>
+            <div class="metric-grid analysis-metric-grid income-analysis-metric-grid">
+              <article class="metric">
+                <span>本期收入</span>
+                <strong id="incomeAnalysisTotal">¥0</strong>
+              </article>
+              <article class="metric">
+                <span>最大收入来源</span>
+                <strong id="incomeAnalysisTopCategory">-</strong>
+              </article>
+              <article class="metric">
+                <span>稳定收入</span>
+                <strong id="incomeAnalysisStable">¥0</strong>
+              </article>
+              <article class="metric">
+                <span>收入笔数</span>
+                <strong id="incomeAnalysisCount">0 笔</strong>
+              </article>
+            </div>
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>收入分类占比</h2>
+              </div>
+              <div class="donut-area">
+                <div class="donut income-donut" id="incomeDonut"></div>
+                <div class="rank-list" id="incomeShare"></div>
+              </div>
+            </section>
+            <section class="panel spending-analysis-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>收入分析</h2>
+                  <span class="panel-note">从来源、标签和稳定收入查看资金进入方式</span>
+                </div>
+              </div>
+              <div class="spending-insight income-insight" id="incomeInsight">本期还没有足够的收入数据</div>
+              <div class="spending-analysis-grid">
+                <section class="spending-analysis-card">
+                  <h3>收入来源</h3>
+                  <div class="flow-list" id="incomeFlowList"></div>
+                </section>
+                <section class="spending-analysis-card">
+                  <h3>标签排行</h3>
+                  <div class="flow-list" id="incomeTagFlowList"></div>
+                </section>
+                <section class="spending-analysis-card">
+                  <h3>稳定收入</h3>
+                  <div class="flow-list" id="stableIncomeList"></div>
+                </section>
               </div>
             </section>
           </div>
@@ -619,6 +765,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/vendor/supabase.js?v=1"></script>
     <script src="./mock-data.js?v=1"></script>
-    <script src="./app.js?v=beauty-40"></script>
+    <script src="./app.js?v=beauty-62"></script>
   </body>
 </html>
