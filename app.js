@@ -220,7 +220,9 @@ function bindEvents() {
     renderAll();
   });
   document.querySelector("#creditBillMonth").addEventListener("change", (event) => {
-    selectedCreditMonth = event.target.value || currentMonth;
+    const nextMonth = event.target.value;
+    if (!/^\d{4}-\d{2}$/.test(nextMonth)) return;
+    selectedCreditMonth = nextMonth;
     renderCreditCards();
   });
   document.querySelectorAll(".segment").forEach((button) => {
@@ -1044,6 +1046,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
   if (yearTrigger && yearMenu) {
     yearMenu.querySelectorAll("[data-period-year]").forEach((button) => {
       button.onclick = (event) => {
+        event.preventDefault();
         event.stopPropagation();
         const year = Number(button.dataset.periodYear);
         const month = Number(host.querySelector(".period-month-trigger")?.dataset.periodMonthValue || selectedMonth);
@@ -1060,6 +1063,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
             if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
           }
         }
+        if (target.id === "creditBillMonth" && /^\d{4}-\d{2}$/.test(nextValue)) selectedCreditMonth = nextValue;
         renderPeriodCascade(target, kind, nextValue, options);
         target.dispatchEvent(new Event("change", { bubbles: true }));
       };
@@ -1070,6 +1074,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
   if (monthTrigger && monthMenu) {
     monthMenu.querySelectorAll("[data-period-month]").forEach((button) => {
       button.onclick = (event) => {
+        event.preventDefault();
         event.stopPropagation();
         const year = Number(host.querySelector(".period-year-trigger").dataset.periodYearValue);
         const month = Number(button.dataset.periodMonth);
@@ -1081,6 +1086,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
           ? `${year}-${String(month).padStart(2, "0")}`
           : `${year}-${String(month).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
         if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        if (target.id === "creditBillMonth" && /^\d{4}-\d{2}$/.test(nextValue)) selectedCreditMonth = nextValue;
         renderPeriodCascade(target, kind, nextValue, options);
         target.dispatchEvent(new Event("change", { bubbles: true }));
       };
@@ -1091,6 +1097,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
   if (dayTrigger && dayMenu) {
     dayMenu.querySelectorAll("[data-period-day]").forEach((button) => {
       button.onclick = (event) => {
+        event.preventDefault();
         event.stopPropagation();
         const year = Number(host.querySelector(".period-year-trigger").dataset.periodYearValue);
         const month = Number(host.querySelector(".period-month-trigger").dataset.periodMonthValue);
@@ -1099,6 +1106,7 @@ function renderPeriodCascade(target, kind, selectedValue, options = {}) {
         const minute = Number(host.querySelector('[data-period-part="minute"]')?.value || selectedMinute);
         let nextValue = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         if (kind === "datetime") nextValue += `T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        if (target.id === "creditBillMonth" && /^\d{4}-\d{2}$/.test(nextValue)) selectedCreditMonth = nextValue;
         renderPeriodCascade(target, kind, nextValue, options);
         target.dispatchEvent(new Event("change", { bubbles: true }));
       };
@@ -1222,7 +1230,9 @@ function renderCreditCards() {
     return;
   }
 
-  document.querySelector("#creditBillMonth").value = selectedCreditMonth;
+  const creditBillMonthInput = document.querySelector("#creditBillMonth");
+  creditBillMonthInput.value = selectedCreditMonth;
+  renderPeriodCascade(creditBillMonthInput, "month", selectedCreditMonth);
   renderCreditDetailHeader(selectedAccount);
   const installmentBills = state.transactions
     .filter((item) => item.installmentGroupId && item.accountId === selectedAccount.id)
