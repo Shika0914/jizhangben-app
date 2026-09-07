@@ -117,6 +117,7 @@ let selectedType = "expense";
 let selectedBillIds = new Set();
 let selectedCreditAccountId = "";
 let selectedCreditMonth = currentMonth;
+let transactionReturnView = "";
 let currentUser = null;
 let authMode = "login";
 let cloudHydrating = false;
@@ -301,7 +302,7 @@ function bindEvents() {
   document.querySelector("#clearBillSelection").addEventListener("click", clearBillSelection);
   document.querySelector("#deleteSelectedBills").addEventListener("click", deleteSelectedBills);
   document.querySelector("#resetTransaction").addEventListener("click", resetTransactionForm);
-  document.querySelector("#cancelTransactionEdit").addEventListener("click", resetTransactionForm);
+  document.querySelector("#cancelTransactionEdit").addEventListener("click", cancelTransactionEdit);
   document.querySelector("#openAccountModal").addEventListener("click", openNewAccountModal);
   document.querySelector("#closeAccountModal").addEventListener("click", closeAccountModal);
   document.querySelector("#cancelAccountModal").addEventListener("click", closeAccountModal);
@@ -2037,8 +2038,11 @@ function saveTransaction(event) {
     toast(balanceError);
     return;
   }
+  const returnView = existingTransaction ? transactionReturnView : "";
   upsertTransaction(transaction);
   resetTransactionForm();
+  transactionReturnView = "";
+  if (returnView) switchView(returnView);
   form.amount.focus();
   toast(existingTransaction ? "账单已修改" : "账单已保存");
 }
@@ -2337,6 +2341,8 @@ function validateNonCreditBalancesAfterTransaction(transaction) {
 function editTransaction(id) {
   const item = findTransaction(id);
   if (!item) return;
+  const activeView = [...el.views].find((view) => view.classList.contains("active"));
+  transactionReturnView = activeView?.id.replace(/View$/, "") || "bills";
   selectedType = item.type;
   setType(item.type);
   const form = el.transactionForm;
@@ -2615,6 +2621,13 @@ function resetTransactionForm() {
   selectedType = "expense";
   setType("expense");
   setTransactionFormMode(false);
+  transactionReturnView = "";
+}
+
+function cancelTransactionEdit() {
+  const returnView = el.transactionForm.id.value ? transactionReturnView : "";
+  resetTransactionForm();
+  if (returnView) switchView(returnView);
 }
 
 function setTransactionFormMode(isEditing) {

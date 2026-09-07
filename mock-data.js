@@ -142,6 +142,17 @@
   addTransaction({ monthOffset: 0, day: 19, type: "income", amount: 600, categoryId: "other-income", accountId: "wechat", note: "朋友归还垫付款", tags: ["往来"] });
   addTransaction({ monthOffset: 0, day: 20, amount: 120, currency: "EUR", categoryId: "travel", accountId: "credit-travel", note: "酒店预订", tags: ["旅行", "信用卡"] });
 
+  addTransaction({ monthOffset: 0, day: 4, type: "income", amount: 2600, categoryId: "side", accountId: "bank-main", note: "设计项目尾款", tags: ["副业", "项目"] });
+  addTransaction({ monthOffset: 0, day: 6, type: "income", amount: 320, categoryId: "investment", accountId: "bank-multi", note: "指数基金分红", tags: ["投资", "分红"] });
+  addTransaction({ monthOffset: 0, day: 7, amount: 76, categoryId: "transport", accountId: "wechat", note: "地铁与打车", tags: ["通勤"] });
+  addTransaction({ monthOffset: 0, day: 8, amount: 268, categoryId: "shopping", accountId: "alipay", note: "家居收纳用品", tags: ["生活", "家居"] });
+  addTransaction({ monthOffset: 0, day: 10, amount: 188, categoryId: "medical", accountId: "wechat", note: "药品与护理用品", tags: ["健康"] });
+  addTransaction({ monthOffset: 0, day: 11, amount: 299, categoryId: "education", accountId: "credit-cmb", note: "专业课程订阅", tags: ["学习", "订阅", "信用卡"] });
+  addTransaction({ monthOffset: 0, day: 13, amount: 58, categoryId: "fitness", accountId: "alipay", note: "游泳馆次卡", tags: ["健康", "运动"] });
+  addTransaction({ monthOffset: 0, day: 15, amount: 146, categoryId: "pet", accountId: "wechat", note: "宠物粮食", tags: ["宠物"] });
+  addTransaction({ monthOffset: 0, day: 17, amount: 520, currency: "EUR", categoryId: "shopping", accountId: "credit-travel", note: "旅行装备", tags: ["旅行", "装备", "信用卡"] });
+  addTransaction({ monthOffset: 0, day: 18, type: "transfer", amount: 900, currency: "CNY", categoryId: "transfer", accountId: "bank-main", targetAccountId: "credit-cmb", note: "提前偿还部分信用卡", tags: ["信用卡还款"] , creditBillAccountId: "credit-cmb", creditBillMonth: monthKey(0) });
+
   addTransaction({ monthOffset: -1, day: 13, amount: 680, categoryId: "other-expense", accountId: "credit-cmb", note: "初始信用卡欠款", tags: ["初始欠款"], openingCreditDebt: true });
 
   const installmentGroupId = "demo-installment-laptop";
@@ -160,6 +171,26 @@
       installmentCount: 6,
       installmentTotal: 2399,
       installmentPurchaseDate: installmentPurchase,
+    });
+  }
+
+  const travelInstallmentGroupId = "demo-installment-camera";
+  const travelInstallmentPurchase = datePoint(-2, 21, 16).date;
+  for (let index = 0; index < 3; index += 1) {
+    addTransaction({
+      monthOffset: index - 2,
+      day: 22,
+      amount: 220,
+      currency: "EUR",
+      categoryId: "travel",
+      accountId: "credit-travel",
+      note: `旅行相机 ${index + 1}/3`,
+      tags: ["旅行", "分期", "外币信用卡"],
+      installmentGroupId: travelInstallmentGroupId,
+      installmentIndex: index + 1,
+      installmentCount: 3,
+      installmentTotal: 660,
+      installmentPurchaseDate: travelInstallmentPurchase,
     });
   }
 

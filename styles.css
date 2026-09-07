@@ -740,6 +740,9 @@ input[type="color"]::-moz-color-swatch {
 }
 
 .stats-toolbar {
+  position: relative;
+  z-index: 20;
+  overflow: visible;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -781,6 +784,8 @@ input[type="color"]::-moz-color-swatch {
 }
 
 .stats-period-controls {
+  position: relative;
+  z-index: 21;
   display: flex;
   align-items: end;
   justify-content: flex-end;
@@ -852,6 +857,8 @@ input[type="color"]::-moz-color-swatch {
 }
 
 .stats-subnav {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
@@ -4823,6 +4830,14 @@ select.period-picker-control {
 
 .period-picker-details > summary {
   list-style: none;
+}
+
+.stats-toolbar .period-picker-details {
+  z-index: 22;
+}
+
+.stats-toolbar .period-picker-details[open] {
+  z-index: 23;
 }
 
 .period-picker-details > summary::-webkit-details-marker {
