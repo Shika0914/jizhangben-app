@@ -80,6 +80,12 @@
 
   const transactions = [];
   let transactionIndex = 0;
+  let randomSeed = currentYear * 100 + currentMonthIndex + 31;
+  const random = () => {
+    randomSeed = (randomSeed * 9301 + 49297) % 233280;
+    return randomSeed / 233280;
+  };
+  const randomAmount = (min, max, step = 1) => Math.round((min + random() * (max - min)) / step) * step;
   const addTransaction = ({ monthOffset = 0, day = 1, hour = 9, minute = 0, ...data }) => {
     transactionIndex += 1;
     const dateFields = datePoint(monthOffset, day, hour, minute);
@@ -152,6 +158,45 @@
   addTransaction({ monthOffset: 0, day: 15, amount: 146, categoryId: "pet", accountId: "wechat", note: "宠物粮食", tags: ["宠物"] });
   addTransaction({ monthOffset: 0, day: 17, amount: 520, currency: "EUR", categoryId: "shopping", accountId: "credit-travel", note: "旅行装备", tags: ["旅行", "装备", "信用卡"] });
   addTransaction({ monthOffset: 0, day: 18, type: "transfer", amount: 900, currency: "CNY", categoryId: "transfer", accountId: "bank-main", targetAccountId: "credit-cmb", note: "提前偿还部分信用卡", tags: ["信用卡还款"] , creditBillAccountId: "credit-cmb", creditBillMonth: monthKey(0) });
+
+  const randomExpenseOptions = [
+    ["food", "alipay", "日常餐饮", ["生活"]],
+    ["transport", "wechat", "通勤出行", ["通勤"]],
+    ["shopping", "alipay", "线上购物", ["购物"]],
+    ["beverage", "wechat", "饮料与咖啡", ["饮料"]],
+    ["daily", "cash", "日用品补充", ["生活"]],
+    ["fun", "alipay", "休闲娱乐", ["娱乐"]],
+  ];
+  for (let offset = -5; offset <= 0; offset += 1) {
+    const sampleCount = offset === 0 ? 5 : 3;
+    for (let index = 0; index < sampleCount; index += 1) {
+      const [categoryId, accountId, note, tags] = randomExpenseOptions[(index + Math.abs(offset)) % randomExpenseOptions.length];
+      const day = offset === 0 ? Math.min(now.getDate(), index + 1) : 4 + index * 7;
+      addTransaction({
+        monthOffset: offset,
+        day,
+        hour: 8 + Math.floor(random() * 12),
+        amount: randomAmount(26, 420, 2),
+        categoryId,
+        accountId,
+        note: `${note} ${String(index + 1).padStart(2, "0")}`,
+        tags: [...tags, "随机演示"],
+      });
+    }
+  }
+  for (let offset = -4; offset <= 0; offset += 1) {
+    const day = offset === 0 ? Math.min(now.getDate(), 2) : 15;
+    addTransaction({
+      monthOffset: offset,
+      day,
+      type: "income",
+      amount: randomAmount(280, 1600, 20),
+      categoryId: offset % 2 === 0 ? "side" : "bonus",
+      accountId: "bank-main",
+      note: offset % 2 === 0 ? "随机项目收入" : "随机奖励收入",
+      tags: ["随机演示", "收入"],
+    });
+  }
 
   addTransaction({ monthOffset: -1, day: 13, amount: 680, categoryId: "other-expense", accountId: "credit-cmb", note: "初始信用卡欠款", tags: ["初始欠款"], openingCreditDebt: true });
 

@@ -7,7 +7,7 @@
     <meta name="application-version" content="3.1" />
     <title>记账本 - 个人记账</title>
     <link id="appFavicon" rel="icon" href="./assets/icons/app-logo.svg?v=3" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=beauty-60" />
+    <link rel="stylesheet" href="./styles.css?v=beauty-61" />
   </head>
   <body>
     <div class="app-shell">
@@ -561,7 +561,10 @@
             </div>
             <section class="panel">
               <div class="panel-heading">
-                <h2>支出分类占比</h2>
+                <div>
+                  <h2>支出分类占比</h2>
+                  <span class="panel-note">点击分类查看账单明细</span>
+                </div>
               </div>
               <div class="donut-area">
                 <div class="donut" id="categoryDonut"></div>
@@ -632,7 +635,10 @@
             </div>
             <section class="panel">
               <div class="panel-heading">
-                <h2>收入分类占比</h2>
+                <div>
+                  <h2>收入分类占比</h2>
+                  <span class="panel-note">点击分类查看账单明细</span>
+                </div>
               </div>
               <div class="donut-area">
                 <div class="donut income-donut" id="incomeDonut"></div>
@@ -733,6 +739,16 @@
       </section>
     </div>
 
+    <div class="modal-backdrop stats-category-modal" id="statsCategoryModal" hidden>
+      <section class="modal-dialog stats-category-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="statsCategoryModalTitle">
+        <div class="modal-heading">
+          <h2 id="statsCategoryModalTitle">分类账单明细</h2>
+          <button class="modal-close" id="closeStatsCategoryModal" type="button" aria-label="关闭分类账单明细" title="关闭">×</button>
+        </div>
+        <div class="stats-category-modal-content" id="statsCategoryModalContent"></div>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="authModal" hidden>
       <section class="modal-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="authFormTitle">
         <form id="authForm">
@@ -764,7 +780,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./assets/vendor/supabase.js?v=1"></script>
-    <script src="./mock-data.js?v=2"></script>
-    <script src="./app.js?v=beauty-65"></script>
+    <script src="./mock-data.js?v=3"></script>
+    <script src="./app.js?v=beauty-67"></script>
   </body>
 </html>

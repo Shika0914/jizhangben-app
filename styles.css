@@ -1232,6 +1232,110 @@ input[type="color"]::-moz-color-swatch {
   border-bottom: 1px solid var(--line);
 }
 
+.stats-category-trigger {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease, transform 160ms var(--ease-out-ui);
+}
+
+.stats-category-trigger:hover {
+  background: rgba(23, 107, 95, 0.055);
+}
+
+.stats-category-trigger:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid rgba(23, 107, 95, 0.5);
+  outline-offset: -2px;
+}
+
+.stats-category-detail {
+  padding: 0;
+}
+
+.stats-category-modal-dialog {
+  width: min(760px, 100%);
+}
+
+.stats-category-modal-content {
+  padding: 20px;
+}
+
+.stats-category-modal-content .stats-category-detail-heading {
+  margin-bottom: 16px;
+}
+
+.stats-category-detail-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.stats-category-detail-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0 0;
+  font-size: 15px;
+}
+
+.stats-category-detail-heading h3 .category-badge {
+  flex: 0 0 auto;
+}
+
+.stats-category-detail-total {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.stats-category-detail-total strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-category-detail-total span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stats-category-bill-list {
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+@media (max-width: 560px) {
+  .stats-category-modal .modal-dialog {
+    width: min(100%, 480px);
+  }
+
+  .stats-category-modal-content {
+    padding: 16px;
+  }
+
+  .stats-category-detail-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .stats-category-detail-total {
+    grid-column: 1;
+    justify-items: start;
+  }
+
+  .stats-category-detail-heading > .icon-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
 .account-item {
   display: grid;
   grid-template-columns: auto minmax(120px, 1fr) auto auto;

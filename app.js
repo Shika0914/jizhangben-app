@@ -134,6 +134,7 @@ let assetsValueMode = "net";
 let statsAssetValueMode = "net";
 let summaryCurrency = "CNY";
 let statsPage = "overview";
+let statsDrilldownCategory = { type: "", categoryId: "" };
 const statsExcludedCategories = new Set();
 const statsExcludedTags = new Set();
 
@@ -158,6 +159,7 @@ const el = {
   logoPickerButton: document.querySelector("#logoPickerButton"),
   logoPickerMenu: document.querySelector("#logoPickerMenu"),
   accountModal: document.querySelector("#accountModal"),
+  statsCategoryModal: document.querySelector("#statsCategoryModal"),
   authModal: document.querySelector("#authModal"),
   authForm: document.querySelector("#authForm"),
   syncStatus: document.querySelector("#syncStatus"),
@@ -280,6 +282,7 @@ function bindEvents() {
   });
   document.querySelector("#statsView").addEventListener("change", handleStatsFilterChange);
   document.querySelector("#statsView").addEventListener("click", handleStatsFilterClick);
+  document.querySelector("#statsView").addEventListener("click", handleStatsCategoryClick);
   document.querySelector("#statsView").addEventListener("keydown", handleStatsFilterKeydown);
   el.categoryForm.addEventListener("submit", saveCategory);
   [el.categoryForm.name, el.categoryForm.color].forEach((field) => {
@@ -312,8 +315,13 @@ function bindEvents() {
   el.authModal.addEventListener("click", (event) => {
     if (event.target === el.authModal) closeAuthModal();
   });
+  document.querySelector("#closeStatsCategoryModal").addEventListener("click", closeStatsCategoryModal);
+  el.statsCategoryModal.addEventListener("click", (event) => {
+    if (event.target === el.statsCategoryModal) closeStatsCategoryModal();
+  });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !el.accountModal.hidden) closeAccountModal();
+    if (event.key === "Escape" && !el.statsCategoryModal.hidden) closeStatsCategoryModal();
     if (event.key === "Escape" && !el.authModal.hidden) closeAuthModal();
   });
   document.querySelector("#resetCategory").addEventListener("click", resetCategoryForm);
@@ -1316,6 +1324,7 @@ function renderStats() {
   renderNetWorthTrend(currency, period, statsAssetValueMode);
   renderCategoryShare(categoryTotals, expense, currency);
   renderIncomeShare(incomeTotals, income, currency);
+  renderStatsCategoryModal(transactions, period, currency);
   renderSpendingAnalysis(transactions, categoryTotals, expense, currency);
   renderIncomeAnalysis(transactions, incomeTotals, income, currency);
   renderStatsFilters();
@@ -1341,6 +1350,21 @@ function handleStatsFilterChange(event) {
   if (!checkbox) return;
   if (checkbox.checked) statsExcludedCategories.add(checkbox.value);
   else statsExcludedCategories.delete(checkbox.value);
+  renderStats();
+}
+
+function handleStatsCategoryClick(event) {
+  if (event.target.closest("[data-stats-category-clear]")) {
+    statsDrilldownCategory = { type: "", categoryId: "" };
+    renderStats();
+    return;
+  }
+  const trigger = event.target.closest("[data-stats-category-drilldown]");
+  if (!trigger) return;
+  statsDrilldownCategory = {
+    type: trigger.dataset.statsCategoryType || "",
+    categoryId: trigger.dataset.statsCategoryDrilldown || "",
+  };
   renderStats();
 }
 
@@ -1716,14 +1740,14 @@ function getAssetValueAt(currency, cutoff, mode = "net") {
 }
 
 function renderCategoryShare(rows, total, currency) {
-  renderCategoryDonut("categoryDonut", "categoryShare", rows, total, currency, "本期还没有支出");
+  renderCategoryDonut("categoryDonut", "categoryShare", rows, total, currency, "本期还没有支出", "expense");
 }
 
 function renderIncomeShare(rows, total, currency) {
-  renderCategoryDonut("incomeDonut", "incomeShare", rows, total, currency, "本期还没有收入");
+  renderCategoryDonut("incomeDonut", "incomeShare", rows, total, currency, "本期还没有收入", "income");
 }
 
-function renderCategoryDonut(donutId, listId, rows, total, currency, emptyText) {
+function renderCategoryDonut(donutId, listId, rows, total, currency, emptyText, type) {
   let cursor = 0;
   const segments = rows
     .map((row) => {
@@ -1737,13 +1761,52 @@ function renderCategoryDonut(donutId, listId, rows, total, currency, emptyText) 
   renderList(
     listId,
     rows,
-    (row) => `<div class="rank-item">
+    (row) => `<button class="rank-item stats-category-trigger" type="button" data-stats-category-type="${type}" data-stats-category-drilldown="${escapeHtml(row.category.id)}" aria-label="查看${escapeHtml(row.category.name)}明细" title="点击查看${escapeHtml(row.category.name)}账单明细">
       ${categoryBadge(row.category)}
       <div class="item-main"><strong>${row.category.name}</strong><span>${Math.round((row.amount / Math.max(total, 1)) * 100)}%</span></div>
       <strong>${money(row.amount, currency)}</strong>
-    </div>`,
+    </button>`,
     emptyText
   );
+}
+
+function renderStatsCategoryModal(transactions, period, currency) {
+  const target = document.querySelector("#statsCategoryModalContent");
+  if (!target || !el.statsCategoryModal) return;
+  const { type, categoryId } = statsDrilldownCategory;
+  const category = categoryId ? findCategory(categoryId) : null;
+  if (!category) {
+    el.statsCategoryModal.hidden = true;
+    target.innerHTML = "";
+    document.body.classList.remove("modal-open");
+    return;
+  }
+  const rows = transactions
+    .filter((item) => item.type === type && item.categoryId === categoryId)
+    .sort((a, b) => transactionLocalDateTime(b) - transactionLocalDateTime(a));
+  el.statsCategoryModal.hidden = false;
+  document.body.classList.add("modal-open");
+  document.querySelector("#statsCategoryModalTitle").textContent = `${category.name}账单明细`;
+  target.innerHTML = `
+    <div class="stats-category-detail-heading">
+      <div>
+        <span class="panel-note">${escapeHtml(period.summary)} · ${type === "income" ? "收入" : "支出"}分类</span>
+        <h3>${categoryBadge(category)}<span>${escapeHtml(category.name)}</span></h3>
+      </div>
+      <div class="stats-category-detail-total">
+        <strong>${money(rows.reduce((sum, item) => sum + item.amount, 0), currency)}</strong>
+        <span>${rows.length} 笔</span>
+      </div>
+    </div>
+    <div class="bill-list stats-category-bill-list">${rows.length ? rows.map(renderBillItem).join("") : `<div class="empty">本期没有${escapeHtml(category.name)}记录</div>`}</div>`;
+}
+
+function closeStatsCategoryModal() {
+  statsDrilldownCategory = { type: "", categoryId: "" };
+  if (el.statsCategoryModal) el.statsCategoryModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  const target = document.querySelector("#statsCategoryModalContent");
+  if (target) target.innerHTML = "";
 }
 
 function renderStatsFilters() {
@@ -2341,6 +2404,7 @@ function validateNonCreditBalancesAfterTransaction(transaction) {
 function editTransaction(id) {
   const item = findTransaction(id);
   if (!item) return;
+  if (el.statsCategoryModal && !el.statsCategoryModal.hidden) closeStatsCategoryModal();
   const activeView = [...el.views].find((view) => view.classList.contains("active"));
   transactionReturnView = activeView?.id.replace(/View$/, "") || "bills";
   selectedType = item.type;
